@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import Path
 
 import json
@@ -14,17 +15,24 @@ from spectralbridge.pipelines import run_drone_pipeline
 from spectralbridge.pipelines.drone import (
     DRONE_TARGET_BANDS,
     DroneCorrectionUnavailableError,
+    _discover_drone_input_sources,
     _enrich_drone_polygon_parquet_with_index,
     _export_csv_copy_from_parquet,
+    _prepare_drone_source_working_h5,
     apply_drone_corrections,
     build_drone_output_paths,
     collect_drone_spatial_diagnostics,
+    convert_drone_tiff_to_h5,
     _prepare_drone_h5_working_copy,
     clean_name,
     derive_drone_flight_stem,
+    load_drone_manifest,
+    lookup_flight_datetime,
     resolve_band_map,
     save_drone_overlay_debug_plot,
+    summarize_drone_h5_solar_geometry,
 )
+from spectralbridge.utils.paths import get_package_data_path
 from spectralbridge.qa_plots import (
     _classify_drone_scene,
     _correction_report,
@@ -202,6 +210,19 @@ def _patch_basic_drone_runtime(monkeypatch) -> None:
         "spectralbridge.qa_plots.render_drone_panel",
         _fake_render_drone_panel,
     )
+    monkeypatch.setattr(
+        "spectralbridge.pipelines.drone.summarize_drone_h5_solar_geometry",
+        lambda h5_path: {
+            "solar_geometry_source": "raster",
+            "acquisition_datetime_used": None,
+            "solar_zenith_mean": 45.0,
+            "solar_zenith_min": 45.0,
+            "solar_zenith_max": 45.0,
+            "solar_azimuth_mean": 180.0,
+            "solar_azimuth_min": 180.0,
+            "solar_azimuth_max": 180.0,
+        },
+    )
 
 
 def _fake_render_drone_panel(**kwargs):
@@ -248,6 +269,39 @@ def _write_test_raster(
         nodata=nodata,
     ) as dst:
         dst.write(np.ones((4, 4), dtype="float32"), 1)
+    return path
+
+
+def _write_test_multiband_raster(
+    path: Path,
+    *,
+    count: int = 10,
+    crs: str = "EPSG:32613",
+    transform=None,
+    nodata: float = -9999.0,
+) -> Path:
+    transform = transform or from_origin(500000.0, 4100000.0, 10.0, 10.0)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    data = np.stack(
+        [
+            np.full((4, 4), 0.1 + idx * 0.01, dtype="float32")
+            for idx in range(count)
+        ],
+        axis=0,
+    )
+    with rasterio.open(
+        path,
+        "w",
+        driver="GTiff",
+        height=4,
+        width=4,
+        count=count,
+        dtype="float32",
+        crs=crs,
+        transform=transform,
+        nodata=nodata,
+    ) as dst:
+        dst.write(data)
     return path
 
 
@@ -305,6 +359,57 @@ def test_build_drone_output_paths_isolates_per_flight_outputs(tmp_path: Path) ->
     assert paths_b["flight_dir"] == tmp_path / "out" / "SPR2_20230628"
 
 
+def test_discover_drone_input_sources_prefers_h5_and_skips_ancillary_tiffs(
+    tmp_path: Path,
+) -> None:
+    package = tmp_path / "input" / "SPR1-06-28-23-ExportPackage"
+    package.mkdir(parents=True, exist_ok=True)
+    h5_path = package / "aligned_orthomosaic.h5"
+    tif_path = package / "aligned_orthomosaic.tif"
+    slope_path = package / "slope.tif"
+    h5_path.write_bytes(b"fake-h5")
+    tif_path.write_bytes(b"fake-tif")
+    slope_path.write_bytes(b"fake-slope")
+
+    sources = _discover_drone_input_sources(tmp_path / "input")
+
+    assert len(sources) == 1
+    assert sources[0].source_type == "h5"
+    assert sources[0].source_path == h5_path
+    assert sources[0].flight_stem == "SPR1_20230628"
+
+
+def test_run_drone_pipeline_reports_empty_input_discovery(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    input_dir = tmp_path / "empty_inputs"
+    input_dir.mkdir()
+    output_dir = tmp_path / "out"
+
+    results = run_drone_pipeline(
+        input_h5_dir=input_dir,
+        output_dir=output_dir,
+        apply_topo=False,
+        apply_brdf=False,
+    )
+
+    captured = capsys.readouterr()
+    summary = results["qa_summary"]
+    assert "No supported drone inputs discovered" in captured.err
+    assert summary["discovered_total"] == 0
+    assert summary["attempted_total"] == 0
+    assert summary["input_discovery_status"] == "no_supported_drone_inputs_found"
+    assert summary["input_source_path"] == str(input_dir)
+    assert summary["input_source_path_exists"] is True
+    assert summary["input_source_path_type"] == "directory"
+    assert summary["supported_input_extensions"] == [".h5", ".tif", ".tiff"]
+    assert "input_h5_dir" in summary["skip_reason"]
+
+    qa_summary = json.loads(Path(results["qa_summary_path"]).read_text())
+    assert qa_summary["input_discovery_status"] == "no_supported_drone_inputs_found"
+    assert qa_summary["input_source_path_resolved"] == str(input_dir.resolve())
+
+
 def test_run_drone_pipeline_skips_polygons_cleanly(tmp_path: Path, monkeypatch) -> None:
     h5_path = (
         tmp_path
@@ -348,6 +453,69 @@ def test_run_drone_pipeline_skips_polygons_cleanly(tmp_path: Path, monkeypatch) 
     assert Path(results["qa_summary_path"]).exists()
     assert qa_summary["success_count"] == 1
     assert qa_summary["success_qa_only_no_polygons_count"] == 1
+
+
+def test_run_drone_pipeline_accepts_tiff_sources(tmp_path: Path, monkeypatch) -> None:
+    tif_path = (
+        tmp_path
+        / "input"
+        / "SPR1-06-28-23-ExportPackage"
+        / "aligned_orthomosaic.tif"
+    )
+    tif_path.parent.mkdir(parents=True, exist_ok=True)
+    tif_path.write_bytes(b"fake-tif")
+    manifest_path = tmp_path / "manifest.csv"
+    manifest_path.write_text(
+        "Plot,Day of data collection,Mean Time of data collection (24 hr clock)\n"
+        "SPR1,2023-06-28,19:53:07\n",
+        encoding="utf-8",
+    )
+
+    _patch_basic_drone_runtime(monkeypatch)
+
+    created_paths: list[Path] = []
+    prepare_kwargs: list[dict[str, object]] = []
+
+    def _fake_prepare(
+        source_path,
+        *,
+        source_type,
+        working_path,
+        overwrite=False,
+        **_kwargs,
+    ):
+        prepared = Path(working_path)
+        prepared.parent.mkdir(parents=True, exist_ok=True)
+        prepared.write_bytes(b"fake-h5")
+        created_paths.append(prepared)
+        prepare_kwargs.append(dict(_kwargs))
+        return prepared, False
+
+    monkeypatch.setattr(
+        "spectralbridge.pipelines.drone._prepare_drone_source_working_h5",
+        _fake_prepare,
+    )
+
+    results = run_drone_pipeline(
+        tmp_path / "input",
+        output_dir=tmp_path / "out",
+        apply_topo=False,
+        apply_brdf=False,
+        drone_manifest_path=manifest_path,
+    )
+
+    assert created_paths == [tmp_path / "out" / "SPR1_20230628" / "SPR1_20230628__working.h5"]
+    assert prepare_kwargs[0]["acquisition_datetime"] == datetime(2023, 6, 28, 19, 53, 7)
+    assert prepare_kwargs[0]["require_solar_geometry"] is False
+    assert results["processed"] == [str(tif_path)]
+    file_summary = results["qa_summary"]["files"][0]
+    assert file_summary["input_source_type"] == "tiff"
+    assert file_summary["input_source_filename"] == "aligned_orthomosaic.tif"
+    assert file_summary["manifest_flight_datetime"] == "2023-06-28T19:53:07"
+    assert file_summary["solar_geometry_source"] == "raster"
+    assert results["qa_summary"]["drone_manifest_path"] == str(manifest_path)
+    assert file_summary["prepared_h5_filename"] == "SPR1_20230628__working.h5"
+    assert file_summary["status"] == "success_qa_only_no_polygons"
 
 
 def test_apply_drone_corrections_uses_full_scene_chunk(
@@ -845,11 +1013,15 @@ def test_render_drone_panel_places_invalid_maps_on_bottom_row(
 
     assert output_png.exists()
     axes = captured["axes"]
-    assert axes[1, 0].get_title() == "Correction Distribution vs Wavelength"
-    assert axes[1, 1].get_title() == "Per-Pixel Median Absolute Correction Across Bands"
-    assert axes[2, 0].get_title() == "Drone Overlay Debug"
-    assert axes[3, 0].get_title() == "Raw ENVI -9999 / invalid map"
-    assert axes[3, 1].get_title() == "Corrected ENVI -9999 / invalid map"
+    assert axes[0, 0].get_title().startswith("Raw Reflectance RGB Preview")
+    assert axes[0, 1].get_title() == "Median Spectra And Sampled Pixel Traces"
+    assert axes[1, 0].get_title() == "Correction Distribution By Wavelength"
+    assert axes[1, 1].get_title() == "Spatial Median Absolute Correction Across Bands"
+    assert axes[2, 0].get_title() == "Polygon Overlay On Corrected Raster"
+    assert axes[2, 1].get_title() == "Merged Polygon Parquet Preview"
+    assert axes[3, 0].get_title() == "Raw Invalid / NoData Band Fraction"
+    assert axes[3, 1].get_title() == "Corrected Invalid / NoData Band Fraction"
+    assert all(ax.get_title() != "% changed" for ax in captured["fig"].axes)
 
     plt.close(captured["fig"])
 
@@ -1499,6 +1671,248 @@ def test_prepare_drone_h5_working_copy_patches_only_working_copy(tmp_path: Path)
         assert float(attrs["nodata"]) == pytest.approx(-9999.0)
 
 
+def test_convert_drone_tiff_to_h5_creates_neoncube_readable_working_file(
+    tmp_path: Path,
+) -> None:
+    from spectralbridge.neon_cube import NeonCube
+
+    package = tmp_path / "SPR1-06-28-23-ExportPackage"
+    reflectance_tif = _write_test_multiband_raster(package / "aligned_orthomosaic.tif")
+    slope_tif = _write_test_raster(package / "slope.tif")
+    aspect_tif = _write_test_raster(package / "aspect.tif")
+    sensor_zenith_tif = _write_test_raster(package / "sensor_zenith.tif")
+    sensor_azimuth_tif = _write_test_raster(package / "sensor_azimuth.tif")
+    output_h5 = tmp_path / "out" / "SPR1_20230628__working.h5"
+
+    written = convert_drone_tiff_to_h5(
+        reflectance_tif,
+        output_h5_path=output_h5,
+        slope_tiff=slope_tif,
+        aspect_tiff=aspect_tif,
+        sensor_zenith_tiff=sensor_zenith_tif,
+        sensor_azimuth_tiff=sensor_azimuth_tif,
+        solar_zenith_deg=88.9,
+        solar_azimuth_deg=287.69,
+    )
+
+    assert written == output_h5
+    assert output_h5.exists()
+
+    cube = NeonCube(h5_path=output_h5)
+    assert cube.lines == 4
+    assert cube.columns == 4
+    assert cube.bands == 10
+    np.testing.assert_allclose(
+        cube.wavelengths,
+        np.array([444, 475, 531, 560, 650, 668, 705, 717, 740, 862], dtype=np.float32),
+    )
+    np.testing.assert_allclose(cube.get_ancillary("slope", radians=False), np.ones((4, 4), dtype=np.float32))
+    np.testing.assert_allclose(cube.get_ancillary("solar_zn", radians=False), np.full((4, 4), 88.9, dtype=np.float32))
+
+
+def test_load_drone_manifest_parses_flight_datetime(tmp_path: Path) -> None:
+    manifest_path = tmp_path / "manifest.csv"
+    manifest_path.write_text(
+        " Plot , Day of data collection , Mean Time of data collection (24 hr clock) \n"
+        " AOP_GOLDHILL , 2023-08-15 , 19:53:07 \n",
+        encoding="utf-8",
+    )
+
+    manifest = load_drone_manifest(manifest_path)
+
+    assert manifest["AOP_GOLDHILL"] == datetime(2023, 8, 15, 19, 53, 7)
+
+
+def test_run_drone_pipeline_resolves_manifest_relative_to_input_dir(tmp_path: Path) -> None:
+    input_dir = tmp_path / "input"
+    input_dir.mkdir()
+    manifest_path = input_dir / "manifest.csv"
+    manifest_path.write_text(
+        "Plot,Day of data collection,Mean Time of data collection (24 hr clock)\n"
+        "SPR-1,2023-06-28,17:30:21\n",
+        encoding="utf-8",
+    )
+
+    results = run_drone_pipeline(
+        input_dir,
+        output_dir=tmp_path / "out",
+        apply_topo=False,
+        apply_brdf=False,
+        drone_manifest_path="manifest.csv",
+    )
+
+    assert results["processed"] == []
+    assert results["qa_summary"]["drone_manifest_path"] == str(manifest_path)
+
+
+def test_run_drone_pipeline_uses_bundled_manifest_by_default(tmp_path: Path) -> None:
+    input_dir = tmp_path / "input"
+    input_dir.mkdir()
+
+    results = run_drone_pipeline(
+        input_dir,
+        output_dir=tmp_path / "out",
+        apply_topo=False,
+        apply_brdf=False,
+    )
+
+    assert results["processed"] == []
+    assert results["qa_summary"]["drone_manifest_path"] == str(
+        get_package_data_path("drone_field_manifest.csv")
+    )
+
+
+def test_run_drone_pipeline_resolves_original_manifest_filename_to_bundle(
+    tmp_path: Path,
+) -> None:
+    input_dir = tmp_path / "input"
+    input_dir.mkdir()
+
+    results = run_drone_pipeline(
+        input_dir,
+        output_dir=tmp_path / "out",
+        apply_topo=False,
+        apply_brdf=False,
+        drone_manifest_path="Drone Field Data Macrosystems - UAS Data Processing For Extraction.csv",
+    )
+
+    assert results["processed"] == []
+    assert results["qa_summary"]["drone_manifest_path"] == str(
+        get_package_data_path("drone_field_manifest.csv")
+    )
+
+
+def test_run_drone_pipeline_resolves_manifest_relative_to_relative_input_folder(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    work_dir = tmp_path / "work"
+    input_dir = work_dir / "drone_inputs"
+    input_dir.mkdir(parents=True)
+    manifest_path = input_dir / "manifest.csv"
+    manifest_path.write_text(
+        "Plot,Day of data collection,Mean Time of data collection (24 hr clock)\n"
+        "SPR-1,2023-06-28,17:30:21\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(work_dir)
+
+    results = run_drone_pipeline(
+        "drone_inputs",
+        output_dir=tmp_path / "out",
+        apply_topo=False,
+        apply_brdf=False,
+        drone_manifest_path="manifest.csv",
+    )
+
+    assert results["processed"] == []
+    assert results["qa_summary"]["drone_manifest_path"] == str(manifest_path)
+
+
+def test_run_drone_pipeline_missing_manifest_error_lists_checked_paths(
+    tmp_path: Path,
+) -> None:
+    input_dir = tmp_path / "input"
+    input_dir.mkdir()
+
+    with pytest.raises(FileNotFoundError, match="Drone manifest CSV not found") as excinfo:
+        run_drone_pipeline(
+            input_dir,
+            output_dir=tmp_path / "out",
+            apply_topo=False,
+            apply_brdf=False,
+            drone_manifest_path="missing_manifest.csv",
+        )
+
+    message = str(excinfo.value)
+    assert "Pass an absolute path" in message
+    assert str(input_dir / "missing_manifest.csv") in message
+
+
+def test_lookup_flight_datetime_matches_manifest_id_without_date_suffix() -> None:
+    manifest = {"AOP_GOLDHILL": datetime(2023, 8, 15, 19, 53, 7)}
+
+    acquisition_datetime = lookup_flight_datetime("AOP_GOLDHILL_20230814", manifest)
+
+    assert acquisition_datetime == datetime(2023, 8, 15, 19, 53, 7)
+
+
+def test_lookup_flight_datetime_matches_compact_mixed_separator_id() -> None:
+    manifest = {"SPR_1": datetime(2023, 6, 28, 17, 30, 21)}
+
+    acquisition_datetime = lookup_flight_datetime("SPR1_20230628", manifest)
+
+    assert acquisition_datetime == datetime(2023, 6, 28, 17, 30, 21)
+
+
+def test_convert_drone_tiff_to_h5_computes_manifest_solar_geometry(
+    tmp_path: Path,
+) -> None:
+    package = tmp_path / "AOP_GOLDHILL_20230814"
+    reflectance_tif = _write_test_multiband_raster(package / "aligned_orthomosaic.tif")
+    output_h5 = tmp_path / "out" / "AOP_GOLDHILL_20230814__working.h5"
+
+    written = convert_drone_tiff_to_h5(
+        reflectance_tif,
+        output_h5_path=output_h5,
+        acquisition_datetime=datetime(2023, 8, 15, 19, 53, 7),
+        require_solar_geometry=True,
+    )
+
+    assert written == output_h5
+    with h5py.File(output_h5, "r") as h5_file:
+        metadata = h5_file["AOP_GOLDHILL_20230814/Reflectance/Metadata"]
+        solar_zenith = metadata["Solar_Zenith_Angle"][()]
+        solar_azimuth = metadata["Solar_Azimuth_Angle"][()]
+        assert solar_zenith.shape == (4, 4)
+        assert solar_azimuth.shape == (4, 4)
+        assert np.isfinite(solar_zenith).all()
+        assert np.isfinite(solar_azimuth).all()
+        assert metadata.attrs["solar_geometry_source"] == "manifest_computed"
+        assert metadata.attrs["acquisition_datetime_used"] == "2023-08-15T19:53:07"
+
+    summary = summarize_drone_h5_solar_geometry(output_h5)
+    assert summary["solar_geometry_source"] == "manifest_computed"
+    assert summary["acquisition_datetime_used"] == "2023-08-15T19:53:07"
+    assert summary["solar_zenith_mean"] is not None
+
+
+def test_convert_drone_tiff_to_h5_requires_solar_geometry_when_requested(
+    tmp_path: Path,
+) -> None:
+    package = tmp_path / "AOP_GOLDHILL_20230814"
+    reflectance_tif = _write_test_multiband_raster(package / "aligned_orthomosaic.tif")
+
+    with pytest.raises(RuntimeError, match="requires solar geometry"):
+        convert_drone_tiff_to_h5(
+            reflectance_tif,
+            output_h5_path=tmp_path / "out" / "missing_geometry.h5",
+            require_solar_geometry=True,
+        )
+
+
+def test_prepare_drone_source_working_h5_converts_tiff_sources(tmp_path: Path) -> None:
+    package = tmp_path / "SPR1-06-28-23-ExportPackage"
+    reflectance_tif = _write_test_multiband_raster(package / "aligned_orthomosaic.tif")
+    _write_test_raster(package / "slope.tif")
+    _write_test_raster(package / "aspect.tif")
+    _write_test_raster(package / "sensor_zenith.tif")
+    _write_test_raster(package / "sensor_azimuth.tif")
+    working_h5 = tmp_path / "prepared" / "SPR1_20230628__working.h5"
+
+    prepared_path, patched = _prepare_drone_source_working_h5(
+        reflectance_tif,
+        source_type="tiff",
+        working_path=working_h5,
+        tiff_solar_zenith_deg=88.9,
+        tiff_solar_azimuth_deg=287.69,
+    )
+
+    assert prepared_path == working_h5
+    assert patched is False
+    assert prepared_path.exists()
+
+
 def test_run_drone_pipeline_prepares_working_copy_before_neoncube(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -1561,6 +1975,19 @@ def test_run_drone_pipeline_prepares_working_copy_before_neoncube(
         "spectralbridge.qa_plots.render_drone_panel",
         _fake_render_drone_panel,
     )
+    monkeypatch.setattr(
+        "spectralbridge.pipelines.drone.summarize_drone_h5_solar_geometry",
+        lambda h5_path: {
+            "solar_geometry_source": "raster",
+            "acquisition_datetime_used": None,
+            "solar_zenith_mean": 45.0,
+            "solar_zenith_min": 45.0,
+            "solar_zenith_max": 45.0,
+            "solar_azimuth_mean": 180.0,
+            "solar_azimuth_min": 180.0,
+            "solar_azimuth_max": 180.0,
+        },
+    )
 
     results = run_drone_pipeline(
         h5_path.parent,
@@ -1598,7 +2025,7 @@ def test_run_drone_pipeline_reports_progress_and_statuses(
     captured = capsys.readouterr()
     assert "[drone] Starting batch: 2 discovered | 2 to process" in captured.err
     assert "[drone] [1/2] SPR1_20230628 | source=" in captured.err
-    assert "stage=preparing H5" in captured.err
+    assert "| type=h5 | stage=preparing working H5" in captured.err
     assert "[drone] [2/2] SPR2_20230628 -> success_qa_only_no_polygons (" in captured.err
     assert "[drone] Complete: 2 total | 2 success_total | 0 success_extracted | 0 success_qa_only_no_polygon_overlap | 2 success_qa_only_no_polygons | 0 failed_other" in captured.err
 

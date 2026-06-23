@@ -1,7 +1,7 @@
 """Polygon extraction helpers for building spectral libraries.
 
 This module provides utilities for extracting polygon-based subsets from the
-per-pixel Parquet products that the Cross-Sensor Calibration pipeline already
+per-pixel Parquet products that the SpectralBridge pipeline already
 produces.  The helpers are intentionally orthogonal to the default flightline
 pipeline so that they can be orchestrated separately while the workflow is
 stabilised.
@@ -17,6 +17,15 @@ from typing import Dict, Mapping
 import duckdb
 import numpy as np
 import pandas as pd
+from pandas.api.types import (
+    is_bool_dtype,
+    is_datetime64_any_dtype,
+    is_float_dtype,
+    is_integer_dtype,
+    is_numeric_dtype,
+    is_object_dtype,
+    is_string_dtype,
+)
 
 from cross_sensor_cal.exports.schema_utils import ensure_coord_columns
 
@@ -24,6 +33,143 @@ from ._optional import require_geopandas, require_rasterio
 from .paths import FlightlinePaths
 
 LOGGER = logging.getLogger(__name__)
+
+
+def _series_has_binary_values(series: pd.Series) -> bool:
+    non_null = series.dropna()
+    if non_null.empty:
+        return False
+    sample = non_null.iloc[0]
+    return isinstance(sample, (bytes, bytearray, memoryview))
+
+
+def _infer_polygon_metadata_dtypes(
+    polygon_index_df: pd.DataFrame,
+) -> dict[str, object]:
+    """Infer stable pandas dtypes for polygon metadata columns.
+
+    Chunked polygon extraction writes Parquet incrementally. If the first chunk
+    happens to contain only missing values for a text field, PyArrow can infer
+    Arrow ``null`` and lock the file schema before later chunks contribute real
+    strings. We infer stable metadata dtypes from the full polygon index so
+    every emitted chunk keeps the same text/binary/datetime/int contract.
+    """
+
+    dtype_map: dict[str, object] = {}
+    binary_dtype = None
+    try:
+        import pyarrow as pa
+    except ImportError:  # pragma: no cover - parquet writes require pyarrow
+        pa = None
+    else:
+        if not hasattr(pa, "binary"):
+            pa = None
+        else:
+            binary_dtype = pd.ArrowDtype(pa.binary())
+
+    for column_name in polygon_index_df.columns:
+        if column_name == "pixel_id":
+            continue
+
+        series = polygon_index_df[column_name]
+
+        if column_name == "polygon_id":
+            dtype_map[column_name] = "Int64"
+            continue
+
+        if column_name.endswith("_wkb") or _series_has_binary_values(series):
+            dtype_map[column_name] = binary_dtype or object
+            continue
+
+        if is_datetime64_any_dtype(series):
+            dtype_map[column_name] = series.dtype
+            continue
+
+        if is_bool_dtype(series):
+            dtype_map[column_name] = "boolean"
+            continue
+
+        if is_integer_dtype(series):
+            dtype_map[column_name] = "Int64"
+            continue
+
+        if is_float_dtype(series):
+            dtype_map[column_name] = series.dtype
+            continue
+
+        if isinstance(series.dtype, pd.CategoricalDtype) or is_string_dtype(series):
+            dtype_map[column_name] = "string"
+            continue
+
+        if is_object_dtype(series):
+            dtype_map[column_name] = "string"
+            continue
+
+        if is_numeric_dtype(series):
+            dtype_map[column_name] = series.dtype
+
+    return dtype_map
+
+
+def _normalize_polygon_metadata_chunk(
+    df: pd.DataFrame,
+    metadata_dtypes: Mapping[str, object],
+) -> pd.DataFrame:
+    """Normalize polygon metadata columns to stable chunk-safe dtypes."""
+
+    if not metadata_dtypes:
+        return df
+
+    normalized = df.copy()
+    for column_name, target_dtype in metadata_dtypes.items():
+        if column_name not in normalized.columns:
+            continue
+
+        series = normalized[column_name]
+        binary_values = [
+            None
+            if pd.isna(value)
+            else bytes(value)
+            if isinstance(value, (bytearray, memoryview))
+            else value
+            for value in series
+        ]
+
+        if target_dtype == "string":
+            normalized[column_name] = series.astype("string")
+            continue
+
+        if target_dtype == "Int64":
+            normalized[column_name] = pd.to_numeric(series, errors="coerce").astype("Int64")
+            continue
+
+        if target_dtype == "boolean":
+            normalized[column_name] = series.astype("boolean")
+            continue
+
+        if isinstance(target_dtype, pd.ArrowDtype):
+            normalized[column_name] = pd.Series(
+                binary_values,
+                index=series.index,
+                dtype=target_dtype,
+            )
+            continue
+
+        if target_dtype is object:
+            normalized[column_name] = pd.Series(
+                binary_values,
+                index=series.index,
+                dtype="object",
+            )
+            continue
+
+        if is_datetime64_any_dtype(target_dtype):
+            normalized[column_name] = pd.to_datetime(series, errors="coerce").astype(target_dtype)
+            continue
+
+        normalized[column_name] = pd.to_numeric(series, errors="coerce").astype(target_dtype)
+
+    return normalized
 
 
 def create_dummy_polygon(
@@ -1897,13 +2043,14 @@ def extract_polygon_parquet_from_envi(
         )
         return output_parquet_path
     
-    # Read polygon pixel IDs from index
+    # Read polygon pixel IDs and metadata from index so polygon attributes can
+    # stay attached to each filtered chunk without materializing the full scene.
     con = duckdb.connect()
     try:
-        pixel_ids_df = con.execute(
-            f"SELECT DISTINCT pixel_id FROM read_parquet('{_quote_path(polygon_index_path)}')"
+        polygon_index_df = con.execute(
+            f"SELECT * FROM read_parquet('{_quote_path(polygon_index_path)}')"
         ).df()
-        polygon_pixel_ids = set(pixel_ids_df["pixel_id"].tolist())
+        polygon_pixel_ids = set(polygon_index_df["pixel_id"].tolist())
         LOGGER.info(
             "[polygons-extract-envi] Polygon contains %d unique pixels",
             len(polygon_pixel_ids),
@@ -1913,6 +2060,21 @@ def extract_polygon_parquet_from_envi(
     
     if not polygon_pixel_ids:
         raise ValueError("Polygon index contains no pixels")
+
+    polygon_metadata_dtypes = _infer_polygon_metadata_dtypes(polygon_index_df)
+    polygon_index_df = _normalize_polygon_metadata_chunk(
+        polygon_index_df,
+        polygon_metadata_dtypes,
+    )
+
+    polygon_metadata_columns = [
+        "pixel_id",
+        *[
+            col
+            for col in polygon_index_df.columns
+            if col != "pixel_id"
+        ],
+    ]
     
     # Read ENVI in chunks and filter by polygon pixel_ids
     parquet_name = output_parquet_path.name
@@ -1961,7 +2123,22 @@ def extract_polygon_parquet_from_envi(
             # Filter to only polygon pixels
             filtered = df_chunk[df_chunk["pixel_id"].isin(polygon_pixel_ids)]
             if not filtered.empty:
-                yield filtered
+                metadata_columns = [
+                    col
+                    for col in polygon_metadata_columns
+                    if col == "pixel_id" or col not in filtered.columns
+                ]
+                merged = filtered.merge(
+                    polygon_index_df[metadata_columns],
+                    on="pixel_id",
+                    how="left",
+                )
+                # Protect chunked Parquet writes from null-only early chunks
+                # locking polygon metadata columns to Arrow `null`.
+                yield _normalize_polygon_metadata_chunk(
+                    merged,
+                    polygon_metadata_dtypes,
+                )
     
     filtered_iter = _filtered_iterator()
     
@@ -2165,15 +2342,29 @@ def extract_polygon_parquets_for_flightline(
             LOGGER.info(
                 "[polygons-extract] Filtering %s → %s", parquet_path.name, out_path.name
             )
+            index_columns = _describe_parquet_columns(con, polygon_index_path)
+            product_columns = _describe_parquet_columns(con, parquet_path)
+            select_terms = [
+                f"idx.{_quote_identifier(col)} AS {_quote_identifier(col)}"
+                for col in index_columns
+            ]
+            seen_columns = set(index_columns)
+            for col in product_columns:
+                if col == "pixel_id" or col in seen_columns:
+                    continue
+                select_terms.append(
+                    f"p.{_quote_identifier(col)} AS {_quote_identifier(col)}"
+                )
+                seen_columns.add(col)
+
             sql = (
-                "COPY ("
-                "SELECT p.* FROM read_parquet('"
-                + _quote_path(parquet_path)
-                + "') p "
-                "INNER JOIN read_parquet('"
+                "COPY (SELECT "
+                + ", ".join(select_terms)
+                + " FROM read_parquet('"
                 + _quote_path(polygon_index_path)
-                + "') idx USING (pixel_id)"
-                ") TO '"
+                + "') idx INNER JOIN read_parquet('"
+                + _quote_path(parquet_path)
+                + "') p USING (pixel_id)) TO '"
                 + _quote_path(out_path)
                 + "' (FORMAT PARQUET)"
             )

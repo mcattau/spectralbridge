@@ -1,4 +1,5 @@
-"""Tests ensuring the pipeline does not require Ray unless explicitly requested."""
+"""Tests for required Ray/default engine behavior."""
+
 from __future__ import annotations
 
 import builtins
@@ -40,12 +41,12 @@ def _stub_pipeline(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     monkeypatch.setattr("spectralbridge.pipelines.pipeline.process_one_flightline", lambda **_: None)
 
 
-def test_thread_engine_operates_without_ray(
+def test_thread_engine_does_not_initialize_ray(
     tmp_path: Path,
     _block_ray_import: None,
     _stub_pipeline: None,
 ) -> None:
-    """Thread engine fallback should not require Ray."""
+    """Thread engine fallback should not import or initialize Ray."""
 
     go_forth_and_multiply(
         base_folder=tmp_path,
@@ -56,20 +57,19 @@ def test_thread_engine_operates_without_ray(
     )
 
 
-def test_ray_engine_requires_dependency(
+def test_default_ray_engine_requires_importable_ray(
     tmp_path: Path,
     _block_ray_import: None,
     _stub_pipeline: None,
 ) -> None:
-    """Ray default should surface a helpful error when Ray is missing."""
+    """The default Ray engine should fall back cleanly when Ray is unavailable."""
 
-    with pytest.raises(RuntimeError, match="Optional dependency 'ray'"):
-        go_forth_and_multiply(
-            base_folder=tmp_path,
-            site_code="TEST",
-            year_month="2024-01",
-            flight_lines=["FLIGHT"],
-        )
+    go_forth_and_multiply(
+        base_folder=tmp_path,
+        site_code="TEST",
+        year_month="2024-01",
+        flight_lines=["FLIGHT"],
+    )
 
 
 def test_ray_engine_uses_ray_map(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -107,3 +107,24 @@ def test_ray_engine_uses_ray_map(monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 
     assert calls["num_cpus"] == 3
     assert calls["count"] == 2
+
+
+def test_ray_engine_falls_back_to_threads_when_ray_cannot_initialize(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    _stub_pipeline: None,
+) -> None:
+    monkeypatch.setattr(
+        "spectralbridge.pipelines.pipeline.ray_map",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            RuntimeError("Ray initialization failed before any tasks were submitted.")
+        ),
+    )
+
+    go_forth_and_multiply(
+        base_folder=tmp_path,
+        site_code="TEST",
+        year_month="2024-01",
+        flight_lines=["A"],
+        engine="ray",
+    )

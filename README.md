@@ -1,8 +1,10 @@
 # SpectralBridge — Translating surface reflectance across sensors and scales
 
-**SpectralBridge (formerly cross-sensor-cal)** is a modular Python-based tool that adjusts fine-resolution (few centimeters to ~ 5 meters) “pure” spectra from airborne imaging spectroscopy (IS) and uncrewed aerial system (UAS) multispectral imagery to match the spectral configurations of moderate-resolution satellite sensors (over 30 meters).
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.11167877.svg)](https://doi.org/10.5281/zenodo.11167877)
 
-![[docs/img/pipeline.png](https://github.com/earthlab/spectralbridge/blob/main/docs/EL_workflow_diagram.png)](https://github.com/earthlab/spectralbridge/blob/main/docs/EL_workflow_diagram_updatedQA.png)
+**SpectralBridge** is a modular Python-based tool that adjusts fine-resolution (few centimeters to ~ 5 meters) “pure” spectra from airborne imaging spectroscopy (IS) and uncrewed aerial system (UAS) multispectral imagery to match the spectral configurations of moderate-resolution satellite sensors (over 30 meters).
+
+![SpectralBridge pipeline overview](docs/EL_workflow_diagram_updatedQA.png)
 
 ## Environment setup
 
@@ -40,21 +42,21 @@ spectralbridge-pipeline \
   --max-workers 2
 ```
 
-Legacy `cscal-*` commands remain available for now and forward to the same implementation.
+Legacy CLI aliases remain available for now and forward to the same implementation.
 
 This will:
 
 - Download each NEON `.h5` flight line (with a live download progress bar).
 - Convert the cube to ENVI using canonical `<flight_stem>_envi.img/.hdr` names.
 - Compute and apply BRDF + topographic correction.
-- Convolve to multiple sensor bandpasses (Landsat TM/ETM+/OLI, OLI2, Micasense, etc.).
+- Convolve to multiple sensor bandpasses (Landsat TM/ETM+/OLI, OLI2, MicaSense, etc.).
 - Export reflectance products and per-sensor tables to ENVI + Parquet.
 
 Output structure:
 
 ```text
 output_demo/
-    <flight_stem>.h5                       # raw NEON flightline (safe to delete later)
+    <flight_stem>.h5                       # raw NEON flightline retained at the root
     <flight_stem>/                         # all derived products for that line
         <flight_stem>_envi.img/.hdr/.parquet
         <flight_stem>_brdfandtopo_corrected_envi.img/.hdr/.json/.parquet
@@ -76,9 +78,10 @@ That command re-renders `<flight_stem>_qa.png` inside each per-flightline folder
 
 ### Parallel execution from the CLI
 
-- `--max-workers N` (defaults to `2`) bounds parallelism.
-- `--engine {thread,process,ray}` selects the parallel backend. Ray is only
-  loaded when explicitly requested and requires the optional dependency.
+- `--max-workers N` (defaults to `8`) bounds parallelism.
+- `--engine {ray,thread,process}` selects the parallel backend. Ray is the
+  default engine and is included in the standard install; thread/process engines
+  remain available for local debugging or constrained-memory runs.
 - Each worker processes one flight line in isolation inside its own subdirectory.
 - Logs from each worker are prefixed with the flight line ID for readability.
 - Memory warning: each hyperspectral cube can consume tens of GB in memory, so avoid
@@ -89,24 +92,24 @@ That command re-renders `<flight_stem>_qa.png` inside each per-flightline folder
 > As of v2.2 the pipeline automatically downloads NEON HDF5 cubes, streams live progress
 > bars, and writes every derived product into a dedicated per-flightline folder.
 
-Install the base package (threads/process execution; Ray remains optional):
+Install the package:
 
 ```bash
 pip install spectralbridge
 ```
 
-> Need Ray-backed execution? Install the optional extra instead:
-> `pip install "spectralbridge[full]"`. The default engine uses threads so
-> Ray is not required for typical workflows.
+> Ray is part of the standard dependency set. `spectralbridge[full]` remains
+> available as an alias for existing automation and currently resolves to the
+> same dependency set.
 
-> Upgrading from older versions? Imports under ``cross_sensor_cal`` continue to
-> work for now, but new examples use the ``spectralbridge`` namespace.
+> Upgrading from older versions? Legacy imports continue to work for now, but
+> new examples use the ``spectralbridge`` namespace.
 
 ### Quickstart Example
 
 ```python
-from spectralbridge.pipelines.pipeline import go_forth_and_multiply
 from pathlib import Path
+from spectralbridge import go_forth_and_multiply
 
 go_forth_and_multiply(
     base_folder=Path("output_fresh"),
@@ -157,8 +160,8 @@ output_fresh/
   interruption; it will resume from what's missing.
 - **Per-flightline isolation:** Each flight line has its own subdirectory. This allows
   parallel execution and makes it clear which outputs belong together.
-- **Ephemeral HDF5:** The original NEON `.h5` stays at the top level and can be deleted
-  later if you only want corrected/derived products.
+- **Ephemeral HDF5:** The original NEON `.h5` stays at the top level and can be
+  archived separately if you only want corrected/derived products in the working folder.
 - **QA panels:** After processing, `spectralbridge-qa` generates a multi-panel summary figure per
   flight line, to visually confirm that each step (export, correction, convolution,
   parquet) completed successfully. QA figures are re-generated on every run to reflect
@@ -167,33 +170,34 @@ output_fresh/
 
 ### Parallel Execution
 
-By default the pipeline processes multiple flight lines in sequence. To speed up
-workflows, set `max_workers` in `go_forth_and_multiply()` to run several in
-parallel. Each worker operates on its own subfolder and logs are prefixed with
-the flightline ID:
+By default the pipeline uses the Ray engine and the configured `max_workers`
+budget to process multiple flight lines in parallel. For local debugging or
+constrained-memory workflows, set `engine="thread"` or lower `max_workers`.
+Each worker operates on its own subfolder and logs are prefixed with the
+flightline ID:
 
 ```
 [NEON_D13_NIWO_DP1_L019-1_20230815_directional_reflectance] 🚀 Processing ...
 [NEON_D13_NIWO_DP1_L020-1_20230815_directional_reflectance] 🚀 Processing ...
 ```
 
-Feature availability by install type:
+Install contents:
 
-| Feature | Base | `[full]` |
+| Feature | Standard install | `[full]` alias |
 |---|---|---|
 | Core array ops (NumPy/Scipy) | ✅ | ✅ |
 | Raster I/O (Rasterio) | ✅ | ✅ |
 | Vector I/O/ops (GeoPandas) | ✅ | ✅ |
 | ENVI/HDR (Spectral) | ✅ | ✅ |
 | HDF5 (h5py) | ✅ | ✅ |
-| Ray engine option | ➖ | ✅ |
+| Ray engine | ✅ | ✅ |
 
 Replace `SITE` with a NEON site code and `FLIGHT_LINE` with an actual line identifier.
 
 ## Pipeline overview
 
-Cross-Sensor Calibration processes every flight line through a restart-safe
-seven-stage flow. Each stage streams a tqdm-style progress bar, logs with a
+SpectralBridge runs a cross-sensor calibration workflow for every flight line
+through a restart-safe seven-stage flow. Each stage streams a tqdm-style progress bar, logs with a
 scoped `[flight_stem]` prefix, and writes artifacts using canonical names from
 `get_flight_paths()`:
 
@@ -257,7 +261,7 @@ filenames, and make the parallel logs readable.
 
 ```python
 from pathlib import Path
-from spectralbridge.pipelines.pipeline import go_forth_and_multiply
+from spectralbridge import go_forth_and_multiply
 
 go_forth_and_multiply(
     base_folder=Path("output_tester"),
@@ -357,7 +361,12 @@ valid file remains for the prefix.
 rm base_dir/NEON_D13_NIWO_DP1_L019-1_20230815_directional_reflectance/NEON_D13_NIWO_DP1_L019-1_20230815_directional_reflectance_envi.parquet
 
 # 2. Re-run the pipeline for that flightline; auto-heal will regenerate any missing/invalid parquet
-bin/go_forth_and_multiply base_dir/NEON_D13_NIWO_DP1_L019-1_20230815_directional_reflectance
+spectralbridge-pipeline \
+  --base-folder base_dir \
+  --site-code NIWO \
+  --year-month 2023-08 \
+  --product-code DP1.30006.001 \
+  --flight-lines NEON_D13_NIWO_DP1_L019-1_20230815_directional_reflectance
 
 # 3. Optionally, re-validate in soft mode
 bin/validate_parquets --soft base_dir/NEON_D13_NIWO_DP1_L019-1_20230815_directional_reflectance
@@ -365,8 +374,11 @@ bin/validate_parquets --soft base_dir/NEON_D13_NIWO_DP1_L019-1_20230815_directio
 
 ## Quality Assurance (QA) panels
 
-<!-- TODO: Replace this note with an actual QA panel screenshot when available. -->
-<p align="center"><em>QA panel example coming soon.</em></p>
+<p align="center">
+  <img src="docs/EL_workflow_diagram_updatedQA.png" alt="SpectralBridge workflow diagram showing QA reports in the output stage" width="720">
+</p>
+
+<p align="center"><em>SpectralBridge workflow diagram showing QA reports as part of the output contract. Per-flightline QA PNG/JSON/PDF panels are generated during each run and are documented in the QA pages.</em></p>
 
 - **Panel A – Raw ENVI RGB:** Confirms the uncorrected export renders with sensible
   color balance and spatial alignment.
@@ -470,19 +482,19 @@ pip install spectralbridge
 ## Documentation
 
 Browse the full documentation site at
-[earthlab.github.io/SpectralBridge](https://earthlab.github.io/SpectralBridge).
+[earthlab.github.io/spectralbridge](https://earthlab.github.io/spectralbridge).
 The site is built with MkDocs Material and automatically deployed to GitHub
 Pages.
 
 Key entry points:
 
-- [Overview](docs/overview.md)
+- [Home](docs/index.md)
 - [Quickstart](docs/quickstart.md)
-- [Stage 01 Raster Processing](docs/stage-01-raster-processing.md)
-- [Stage 02 Sorting](docs/stage-02-sorting.md)
-- [Stage 03 Pixel Extraction](docs/stage-03-pixel-extraction.md)
-- [Stage 04 Spectral Library](docs/stage-04-spectral-library.md)
-- [Stage 05 MESMA](docs/stage-05-mesma.md)
+- [Pipeline overview & stages](docs/pipeline/stages.md)
+- [Outputs & file structure](docs/pipeline/outputs.md)
+- [QA panels & metrics](docs/pipeline/qa.md)
+- [Configuration reference](docs/reference/configuration.md)
+- [Validation metrics](docs/reference/validation.md)
 
 ## Support Matrix
 
@@ -493,12 +505,55 @@ Key entry points:
 
 ## Citation
 
-If you use this software, please cite:
+If you use SpectralBridge in research, please cite:
 
-> SpectralBridge (v2.2.0): NEON hyperspectral cross-sensor harmonization pipeline.  
-> See `CITATION.cff` in this repository for full author list and metadata.
+- the software release you used
+- associated publications
+- relevant methods papers for the scientific workflow you rely on
+
+`CITATION.cff` is the authoritative citation source for the repository and
+should be updated alongside each release.
+
+An archived Zenodo software release already exists for the repository's
+pre-rename `cross-sensor-cal` v1.0.0 release:
+[`10.5281/zenodo.11167877`](https://doi.org/10.5281/zenodo.11167877).
+That DOI is now surfaced by the README badge above, but it should not be
+mistaken for a minted DOI for the current `SpectralBridge` `2.2.0` package
+metadata. See [docs/dev/doi-zenodo.md](docs/dev/doi-zenodo.md) for the
+maintainer-facing status and release-update guidance.
+See [docs/dev/software-citation.md](docs/dev/software-citation.md) for the
+maintainer-facing citation policy, publication tracker, and release-citation
+rules.
+
+## Open Science
+
+SpectralBridge is intended to be reusable scientific infrastructure. The
+project emphasizes reproducibility, transparent workflows, software citation,
+and interoperable data products so that results can be inspected, rerun, and
+extended across research groups and computing environments.
+
+## License Status
+
+SpectralBridge is currently distributed under **GPLv3**. The repository also
+contains code and documentation notes that explicitly credit GPLv3-derived
+HyTools adaptations, so any migration to Apache License 2.0 requires a
+maintainer-led provenance and legal review before the project can accurately
+claim that license change.
+
+Apache License 2.0 is being evaluated as a future target because it would
+support broad scientific adoption, commercial use, and long-term
+cyberinfrastructure sustainability. Until that review is complete, the current
+GPLv3 status remains authoritative.
+
+## Commercial Engagement
+
+Open-source distribution does not prevent value-added services around the
+project. Potential examples include hosted processing, cloud deployment,
+workflow support, training, consulting, interoperability validation, and sensor
+integration work. Any future Apache 2.0 migration would preserve those options
+while keeping the software itself open.
 
 ## License
 
-Distributed under the GPLv3 License. Full citation details are available in
+Distributed under the GPLv3 License. Citation metadata lives in
 [CITATION.cff](CITATION.cff).

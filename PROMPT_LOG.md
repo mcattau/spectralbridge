@@ -151,6 +151,55 @@ Found 12 errors.
 Error: Process completed with exit code 1.
 ```
 
+## 2026-06-02 - publication cleanup review
+Branch: main
+
+```text
+i want to clean up the repo but not delete anything. there is a depricated folder. If we feel like anything is deletable, we should move it to the depricated folder rather than actually delete it. I don't expect there to be much vestigial code or documentation but I want to streamline where I can. I like verbose documentation so it's a feature not a bug to have tones of documentation but let's make sure it's correct documentation like it says the correct thing in the correct place. We are about to start a full code review and I want you to do a review first. I want you to comb through everything and try to give feedback on what needs done. I want you to make sure we have an agents.md file and a prompt log in the repo and that the human read me is up to date and accurate. If you find any issues that you want me to fix or address, add them to a features request document as you go and we'll review that at the end. You are welcome to fix small things along the way but I don't want you to make major changes without permission because they may break the code. for example, we use a lot of parquet to speed things up but you love to go back to cvs as an instinct. Don't change our parquet or our chunking or things, just try to clean things up for publication. If there is a chance that it could break something, add it to the feature request list rather than doing it youself. We want this to be ready for publication now that it works the way we want.
+```
+
+## 2026-06-03 - continue feature request backlog
+Branch: main
+
+```text
+do those now
+```
+
+## 2026-06-03 - next feature request set
+Branch: main
+
+```text
+do the next set
+```
+
+## 2026-06-03 - continue next queue items
+Branch: main
+
+```text
+do those next things
+```
+
+## 2026-06-03 - continue backlog after P10
+Branch: main
+
+```text
+now do the next
+```
+
+## 2026-06-03 - release hygiene audit
+Branch: main
+
+```text
+do the next one
+```
+
+## 2026-06-03 - dependency review
+Branch: main
+
+```text
+do the next thing
+```
+
 ## 2026-03-21 - add drone-specific QA plot workflow
 Branch: main
 
@@ -2726,13 +2775,13 @@ tmp_path = PosixPath('/tmp/pytest-of-runner/pytest-0/test_build_drone_qa_summary
         scene_b = tmp_path / "BBB_20230815" / "nested"
         scene_a.mkdir(parents=True)
         scene_b.mkdir(parents=True)
-    
+
         qa_a = scene_a / "AAA_20230814__qa.png"
         qa_b = scene_b / "BBB_20230815__qa.png"
         qa_a.write_bytes(b"png-a")
         qa_b.write_bytes(b"png-b")
         (scene_a / "AAA_20230814__polygons.parquet").write_text("parquet", encoding="utf-8")
-    
+
 >       pdf_path = build_drone_qa_summary(tmp_path)
                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
@@ -2812,4 +2861,2496 @@ tests/test_qa/test_qa_metrics_smoke.py::test_metrics_arrays_are_serialisable
 =========================== short test summary info ============================
 FAILED tests/test_qa_summary.py::test_build_drone_qa_summary_writes_pdf - SyntaxError: not a PNG file
 Error: Process completed with exit code 1.
+```
+
+## 2026-06-02 - smoke and website test coverage review
+Branch: main
+
+```text
+do we have good smoke tests for each of the functions and playwright tests for the website?
+```
+
+## 2026-06-02 - add smoke and website tests
+Branch: main
+
+```text
+we can delete all the popclimtoy anything, that was a different repo that was accidentally pushed to this repo and is totally unrelated. can you remove those and then remove that from the feature request list. add the smoke tests and the playwright tests and clarify Ray. remove those form feature request list when done
+```
+
+## 2026-06-02 - resolve publication feature requests
+Branch: main
+
+```text
+work through that list and do each one. document what you do so we know
+```
+
+## 2026-06-02 - root script container context
+Branch: main
+
+```text
+the root script issue is because we run it in a container and that makes for some strange roots.
+```
+
+## 2026-06-02 - fix docs playwright heading selector
+Branch: main
+
+```text
+Run python -m http.server 8000 --directory site > /tmp/spectralbridge-docs-http.log 2>&1 &
+F                                                                        [100%]
+=================================== FAILURES ===================================
+_________________ test_docs_site_core_pages_render_in_browser __________________
+
+    def test_docs_site_core_pages_render_in_browser() -> None:
+        base_url = _docs_site_url()
+
+        try:
+            from playwright.sync_api import sync_playwright
+        except Exception as exc:  # pragma: no cover - depends on local environment
+            raise AssertionError(
+                "Playwright is required for docs browser smoke tests. "
+                "Install pytest-playwright/playwright and Chromium."
+            ) from exc
+
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch()
+            page = browser.new_page(viewport={"width": 1280, "height": 900})
+            page_errors, console_errors, failed_assets = _collect_page_health(page, base_url)
+
+            try:
+                page.goto(base_url, wait_until="networkidle")
+                assert "SpectralBridge" in page.title()
+>               assert page.get_by_role("heading", name="SpectralBridge").is_visible()
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_docs_playwright.py:67:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+/opt/hostedtoolcache/Python/3.11.15/x64/lib/python3.11/site-packages/playwright/sync_api/_generated.py:19208: in is_visible
+    self._sync(self._impl_obj.is_visible(timeout=to_milliseconds(timeout)))
+/opt/hostedtoolcache/Python/3.11.15/x64/lib/python3.11/site-packages/playwright/_impl/_locator.py:548: in is_visible
+    return await self._frame.is_visible(
+/opt/hostedtoolcache/Python/3.11.15/x64/lib/python3.11/site-packages/playwright/_impl/_frame.py:411: in is_visible
+    return await self._channel.send(
+/opt/hostedtoolcache/Python/3.11.15/x64/lib/python3.11/site-packages/playwright/_impl/_connection.py:69: in send
+    return await self._connection.wrap_api_call(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <playwright._impl._connection.Connection object at 0x7f41e959b050>
+cb = <function Channel.send.<locals>.<lambda> at 0x7f41db8814e0>
+is_internal = False, title = None
+
+    async def wrap_api_call(
+        self, cb: Callable[[], Any], is_internal: bool = False, title: str = None
+    ) -> Any:
+        if self._api_zone.get():
+            return await cb()
+        task = asyncio.current_task(self._loop)
+        st: List[inspect.FrameInfo] = getattr(
+            task, "__pw_stack__", None
+        ) or inspect.stack(0)
+
+        parsed_st = _extract_stack_trace_information_from_stack(st, is_internal, title)
+        self._api_zone.set(parsed_st)
+        try:
+            return await cb()
+        except Exception as error:
+>           raise rewrite_error(error, f"{parsed_st['apiName']}: {error}") from None
+E           playwright._impl._errors.Error: Locator.is_visible: Error: strict mode violation: get_by_role("heading", name="SpectralBridge") resolved to 2 elements:
+E               1) <h1 id="spectralbridge">…</h1> aka get_by_role("heading", name="SpectralBridge ¶")
+E               2) <h2 id="what-spectralbridge-does">…</h2> aka get_by_role("heading", name="What SpectralBridge does ¶")
+E
+E           Call log:
+E               - checking visibility of get_by_role("heading", name="SpectralBridge")
+
+/opt/hostedtoolcache/Python/3.11.15/x64/lib/python3.11/site-packages/playwright/_impl/_connection.py:559: Error
+=========================== short test summary info ============================
+FAILED tests/test_docs_playwright.py::test_docs_site_core_pages_render_in_browser - playwright._impl._errors.Error: Locator.is_visible: Error: strict mode violation: get_by_role("heading", name="SpectralBridge") resolved to 2 elements:
+    1) <h1 id="spectralbridge">…</h1> aka get_by_role("heading", name="SpectralBridge ¶")
+    2) <h2 id="what-spectralbridge-does">…</h2> aka get_by_role("heading", name="What SpectralBridge does ¶")
+
+Call log:
+    - checking visibility of get_by_role("heading", name="SpectralBridge")
+Error: Process completed with exit code 1.
+```
+## 2026-06-02 - fix failing pytest smoke tests
+Branch: main
+
+```text
+Run pytest -q
+.................s....................................................ss [ 24%]
+ss...................................................................... [ 48%]
+.....................................F................F................. [ 72%]
+............................................FFF.............s........... [ 96%]
+...........                                                              [100%]
+=================================== FAILURES ===================================
+_ test_public_function_import_and_signature_smoke[spectralbridge.mask_raster.find_raster_files] _
+
+module_name = 'spectralbridge.mask_raster', function_name = 'find_raster_files'
+
+    @pytest.mark.parametrize(
+        ("module_name", "function_name"),
+        PUBLIC_FUNCTIONS,
+        ids=[f"{module}.{name}" for module, name in PUBLIC_FUNCTIONS],
+    )
+    def test_public_function_import_and_signature_smoke(
+        module_name: str,
+        function_name: str,
+    ) -> None:
+        module = importlib.import_module(module_name)
+>       function = getattr(module, function_name)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'spectralbridge.mask_raster' has no attribute 'find_raster_files'
+
+tests/test_public_api_smoke.py:53: AttributeError
+_ test_public_function_import_and_signature_smoke[spectralbridge.pipelines.download.run_download] _
+
+module_name = 'spectralbridge.pipelines.download'
+function_name = 'run_download'
+
+    @pytest.mark.parametrize(
+        ("module_name", "function_name"),
+        PUBLIC_FUNCTIONS,
+        ids=[f"{module}.{name}" for module, name in PUBLIC_FUNCTIONS],
+    )
+    def test_public_function_import_and_signature_smoke(
+        module_name: str,
+        function_name: str,
+    ) -> None:
+>       module = importlib.import_module(module_name)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_public_api_smoke.py:52: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+/opt/hostedtoolcache/Python/3.11.15/x64/lib/python3.11/importlib/__init__.py:126: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+<frozen importlib._bootstrap>:1204: in _gcd_import
+    ???
+<frozen importlib._bootstrap>:1176: in _find_and_load
+    ???
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+name = 'spectralbridge.pipelines.download'
+import_ = <function _gcd_import at 0x7fef9674fd80>
+
+>   ???
+E   ModuleNotFoundError: No module named 'spectralbridge.pipelines.download'
+
+<frozen importlib._bootstrap>:1140: ModuleNotFoundError
+_ test_public_function_import_and_signature_smoke[spectralbridge.standard_resample.apply_resampler] _
+
+module_name = 'spectralbridge.standard_resample'
+function_name = 'apply_resampler'
+
+    @pytest.mark.parametrize(
+        ("module_name", "function_name"),
+        PUBLIC_FUNCTIONS,
+        ids=[f"{module}.{name}" for module, name in PUBLIC_FUNCTIONS],
+    )
+    def test_public_function_import_and_signature_smoke(
+        module_name: str,
+        function_name: str,
+    ) -> None:
+        module = importlib.import_module(module_name)
+>       function = getattr(module, function_name)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'spectralbridge.standard_resample' has no attribute 'apply_resampler'
+
+tests/test_public_api_smoke.py:53: AttributeError
+_ test_public_function_import_and_signature_smoke[spectralbridge.standard_resample.load_envi_data] _
+
+module_name = 'spectralbridge.standard_resample'
+function_name = 'load_envi_data'
+
+    @pytest.mark.parametrize(
+        ("module_name", "function_name"),
+        PUBLIC_FUNCTIONS,
+        ids=[f"{module}.{name}" for module, name in PUBLIC_FUNCTIONS],
+    )
+    def test_public_function_import_and_signature_smoke(
+        module_name: str,
+        function_name: str,
+    ) -> None:
+        module = importlib.import_module(module_name)
+>       function = getattr(module, function_name)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'spectralbridge.standard_resample' has no attribute 'load_envi_data'
+
+tests/test_public_api_smoke.py:53: AttributeError
+_ test_public_function_import_and_signature_smoke[spectralbridge.standard_resample.translate_to_sensor] _
+
+module_name = 'spectralbridge.standard_resample'
+function_name = 'translate_to_sensor'
+
+    @pytest.mark.parametrize(
+        ("module_name", "function_name"),
+        PUBLIC_FUNCTIONS,
+        ids=[f"{module}.{name}" for module, name in PUBLIC_FUNCTIONS],
+    )
+    def test_public_function_import_and_signature_smoke(
+        module_name: str,
+        function_name: str,
+    ) -> None:
+        module = importlib.import_module(module_name)
+>       function = getattr(module, function_name)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'spectralbridge.standard_resample' has no attribute 'translate_to_sensor'
+
+tests/test_public_api_smoke.py:53: AttributeError
+=============================== warnings summary ===============================
+src/spectralbridge/polygons.py:21
+  /home/runner/work/spectralbridge/spectralbridge/src/spectralbridge/polygons.py:21: DeprecationWarning: cross_sensor_cal is deprecated; use spectralbridge instead.
+    from cross_sensor_cal.exports.schema_utils import ensure_coord_columns
+
+tests/test_drone_pipeline.py::test_render_drone_panel_logs_sampling_debug_and_writes_debug_payload
+  /home/runner/work/spectralbridge/spectralbridge/src/spectralbridge/qa_plots.py:2233: RuntimeWarning: All-NaN slice encountered
+    return np.nanmedian(masked, axis=(1, 2))
+
+tests/test_drone_pipeline.py::test_render_drone_panel_logs_sampling_debug_and_writes_debug_payload
+  /home/runner/work/spectralbridge/spectralbridge/src/spectralbridge/qa_plots.py:388: RuntimeWarning: All-NaN slice encountered
+    delta_median = np.nanmedian(diff, axis=1)
+
+tests/test_drone_pipeline.py::test_render_drone_panel_logs_sampling_debug_and_writes_debug_payload
+tests/test_drone_pipeline.py::test_render_drone_correction_magnitude_returns_richer_spatial_summary
+  /opt/hostedtoolcache/Python/3.11.15/x64/lib/python3.11/site-packages/numpy/lib/_nanfunctions_impl.py:1593: RuntimeWarning: All-NaN slice encountered
+    return fnb._ureduce(a,
+
+tests/test_drone_pipeline.py::test_render_drone_panel_logs_sampling_debug_and_writes_debug_payload
+  /home/runner/work/spectralbridge/spectralbridge/src/spectralbridge/qa_plots.py:393: RuntimeWarning: All-NaN slice encountered
+    delta_abs_median = np.nanmedian(np.abs(diff), axis=1)
+
+tests/test_drone_pipeline.py::test_render_drone_correction_magnitude_returns_richer_spatial_summary
+  /home/runner/work/spectralbridge/spectralbridge/src/spectralbridge/qa_plots.py:2385: RuntimeWarning: All-NaN slice encountered
+    abs_delta = np.nanmedian(full_abs_diff, axis=0)
+
+tests/test_pipeline_convolution.py::test_pipeline_idempotence_skip_behavior
+  /opt/hostedtoolcache/Python/3.11.15/x64/lib/python3.11/site-packages/opentelemetry/util/_importlib_metadata.py:32: DeprecationWarning: SelectableGroups dict interface is deprecated. Use select.
+    return EntryPoints(ep for group_eps in eps.values() for ep in group_eps)
+
+tests/test_pipeline_convolution.py::test_pipeline_idempotence_skip_behavior
+  /opt/hostedtoolcache/Python/3.11.15/x64/lib/python3.11/site-packages/ray/_private/worker.py:2051: FutureWarning: Tip: In future versions of Ray, Ray will no longer override accelerator visible devices env var if num_gpus=0 or num_gpus=None (default). To enable this behavior and turn off this error message, set RAY_ACCEL_ENV_VAR_OVERRIDE_ON_ZERO=0
+    warnings.warn(
+
+tests/test_polygon_pipeline.py::test_build_polygon_pixel_index
+tests/test_polygon_pipeline.py::test_extract_polygon_parquets_for_flightline
+tests/test_polygon_pipeline.py::test_merge_polygon_parquets_for_flightline
+tests/test_polygon_pipeline.py::test_run_polygon_pipeline_for_flightline
+  /home/runner/work/spectralbridge/spectralbridge/src/spectralbridge/polygons.py:1714: Pandas4Warning: The copy keyword is deprecated and will be removed in a future version. Copy-on-Write is active in pandas since 3.0 which utilizes a lazy copy mechanism that defers copies until necessary. Use .copy() to make an eager copy if necessary.
+    polygon_ids = polygons["polygon_id"].astype("int64", copy=False)
+
+tests/test_qa/test_qa_metrics_smoke.py::test_render_panel_writes_png_and_json
+tests/test_qa/test_qa_metrics_smoke.py::test_metrics_arrays_are_serialisable
+  /home/runner/work/spectralbridge/spectralbridge/src/spectralbridge/qa_plots.py:1236: UserWarning: Glyph 10060 (\\N{CROSS MARK}) missing from font(s) DejaVu Sans Mono.
+    pdf.savefig(fig, bbox_inches="tight")
+
+tests/test_qa/test_qa_metrics_smoke.py::test_render_panel_writes_png_and_json
+tests/test_qa/test_qa_metrics_smoke.py::test_metrics_arrays_are_serialisable
+  /home/runner/work/spectralbridge/spectralbridge/src/spectralbridge/qa_plots.py:1236: UserWarning: Glyph 65039 (\\N{VARIATION SELECTOR-16}) missing from font(s) DejaVu Sans Mono.
+    pdf.savefig(fig, bbox_inches="tight")
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/test_public_api_smoke.py::test_public_function_import_and_signature_smoke[spectralbridge.mask_raster.find_raster_files] - AttributeError: module 'spectralbridge.mask_raster' has no attribute 'find_raster_files'
+FAILED tests/test_public_api_smoke.py::test_public_function_import_and_signature_smoke[spectralbridge.pipelines.download.run_download] - ModuleNotFoundError: No module named 'spectralbridge.pipelines.download'
+FAILED tests/test_public_api_smoke.py::test_public_function_import_and_signature_smoke[spectralbridge.standard_resample.apply_resampler] - AttributeError: module 'spectralbridge.standard_resample' has no attribute 'apply_resampler'
+FAILED tests/test_public_api_smoke.py::test_public_function_import_and_signature_smoke[spectralbridge.standard_resample.load_envi_data] - AttributeError: module 'spectralbridge.standard_resample' has no attribute 'load_envi_data'
+FAILED tests/test_public_api_smoke.py::test_public_function_import_and_signature_smoke[spectralbridge.standard_resample.translate_to_sensor] - AttributeError: module 'spectralbridge.standard_resample' has no attribute 'translate_to_sensor'
+(raylet) [2026-06-02 17:59:49,806 I 2920 2920] logging.cc:303: Set ray log level from environment variable RAY_BACKEND_LOG_LEVEL to 2 [repeated 4x across cluster] (Ray deduplicates logs by default. Set RAY_DEDUP_LOGS=0 to disable log deduplication, or see https://docs.ray.io/en/master/ray-observability/user-guides/configure-logging.html#log-deduplication for more options.)
+Error: Process completed with exit code 1.Run python -m http.server 8000 --directory site > /tmp/spectralbridge-docs-http.log 2>&1 &
+F                                                                        [100%]
+=================================== FAILURES ===================================
+_________________ test_docs_site_core_pages_render_in_browser __________________
+
+    def test_docs_site_core_pages_render_in_browser() -> None:
+        base_url = _docs_site_url()
+
+        try:
+            from playwright.sync_api import sync_playwright
+        except Exception as exc:  # pragma: no cover - depends on local environment
+            raise AssertionError(
+                "Playwright is required for docs browser smoke tests. "
+                "Install pytest-playwright/playwright and Chromium."
+            ) from exc
+
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch()
+            page = browser.new_page(viewport={"width": 1280, "height": 900})
+            page_errors, console_errors, failed_assets = _collect_page_health(page, base_url)
+
+            try:
+                page.goto(base_url, wait_until="networkidle")
+                assert "SpectralBridge" in page.title()
+                assert page.locator("h1#spectralbridge").is_visible()
+
+                logo = page.locator("img[alt='SpectralBridge logo']").first
+                assert logo.evaluate("(img) => img.naturalWidth") > 0
+
+                page.goto(urljoin(base_url, "quickstart/"), wait_until="networkidle")
+                assert page.get_by_role("heading", name="Quickstart").is_visible()
+
+                page.goto(urljoin(base_url, "pipeline/outputs/"), wait_until="networkidle")
+                assert page.get_by_role("heading", name="Outputs & File Structure").is_visible()
+                assert page.get_by_text("_merged_pixel_extraction.parquet").first.is_visible()
+
+                page.goto(base_url, wait_until="networkidle")
+>               page.locator("label.md-search__icon[for='__search']").first.click()
+
+tests/test_docs_playwright.py:80: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+/opt/hostedtoolcache/Python/3.11.15/x64/lib/python3.11/site-packages/playwright/sync_api/_generated.py:17422: in click
+    self._sync(
+/opt/hostedtoolcache/Python/3.11.15/x64/lib/python3.11/site-packages/playwright/_impl/_locator.py:163: in click
+    return await self._frame._click(self._selector, strict=True, **params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/opt/hostedtoolcache/Python/3.11.15/x64/lib/python3.11/site-packages/playwright/_impl/_frame.py:569: in _click
+    await self._channel.send("click", self._timeout, locals_to_params(locals()))
+/opt/hostedtoolcache/Python/3.11.15/x64/lib/python3.11/site-packages/playwright/_impl/_connection.py:69: in send
+    return await self._connection.wrap_api_call(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <playwright._impl._connection.Connection object at 0x7f40c70d2090>
+cb = <function Channel.send.<locals>.<lambda> at 0x7f40c6bed620>
+is_internal = False, title = None
+
+    async def wrap_api_call(
+        self, cb: Callable[[], Any], is_internal: bool = False, title: str = None
+    ) -> Any:
+        if self._api_zone.get():
+            return await cb()
+        task = asyncio.current_task(self._loop)
+        st: List[inspect.FrameInfo] = getattr(
+            task, "__pw_stack__", None
+        ) or inspect.stack(0)
+
+        parsed_st = _extract_stack_trace_information_from_stack(st, is_internal, title)
+        self._api_zone.set(parsed_st)
+        try:
+            return await cb()
+        except Exception as error:
+>           raise rewrite_error(error, f"{parsed_st['apiName']}: {error}") from None
+E           playwright._impl._errors.TimeoutError: Locator.click: Timeout 30000ms exceeded.
+E           Call log:
+E             - waiting for locator("label.md-search__icon[for='__search']").first
+E               - locator resolved to <label for="__search" class="md-search__icon md-icon">…</label>
+E             - attempting click action
+E               2 × waiting for element to be visible, enabled and stable
+E                 - element is visible, enabled and stable
+E                 - scrolling into view if needed
+E                 - done scrolling
+E                 - <input type="text" required="" name="query" autocorrect="off" autocomplete="off" spellcheck="false" aria-label="Search" placeholder="Search" autocapitalize="off" class="md-search__input" data-md-component="search-query"/> intercepts pointer events
+E               - retrying click action
+E               - waiting 20ms
+E               2 × waiting for element to be visible, enabled and stable
+E                 - element is visible, enabled and stable
+E                 - scrolling into view if needed
+E                 - done scrolling
+E                 - <input type="text" required="" name="query" autocorrect="off" autocomplete="off" spellcheck="false" aria-label="Search" placeholder="Search" autocapitalize="off" class="md-search__input" data-md-component="search-query"/> intercepts pointer events
+E               - retrying click action
+E                 - waiting 100ms
+E               57 × waiting for element to be visible, enabled and stable
+E                  - element is visible, enabled and stable
+E                  - scrolling into view if needed
+E                  - done scrolling
+E                  - <input type="text" required="" name="query" autocorrect="off" autocomplete="off" spellcheck="false" aria-label="Search" placeholder="Search" autocapitalize="off" class="md-search__input" data-md-component="search-query"/> intercepts pointer events
+E                - retrying click action
+E                  - waiting 500ms
+
+/opt/hostedtoolcache/Python/3.11.15/x64/lib/python3.11/site-packages/playwright/_impl/_connection.py:559: TimeoutError
+=========================== short test summary info ============================
+FAILED tests/test_docs_playwright.py::test_docs_site_core_pages_render_in_browser - playwright._impl._errors.TimeoutError: Locator.click: Timeout 30000ms exceeded.
+Call log:
+  - waiting for locator("label.md-search__icon[for='__search']").first
+    - locator resolved to <label for="__search" class="md-search__icon md-icon">…</label>
+  - attempting click action
+    2 × waiting for element to be visible, enabled and stable
+      - element is visible, enabled and stable
+      - scrolling into view if needed
+      - done scrolling
+      - <input type="text" required="" name="query" autocorrect="off" autocomplete="off" spellcheck="false" aria-label="Search" placeholder="Search" autocapitalize="off" class="md-search__input" data-md-component="search-query"/> intercepts pointer events
+    - retrying click action
+    - waiting 20ms
+    2 × waiting for element to be visible, enabled and stable
+      - element is visible, enabled and stable
+      - scrolling into view if needed
+      - done scrolling
+      - <input type="text" required="" name="query" autocorrect="off" autocomplete="off" spellcheck="false" aria-label="Search" placeholder="Search" autocapitalize="off" class="md-search__input" data-md-component="search-query"/> intercepts pointer events
+    - retrying click action
+      - waiting 100ms
+    57 × waiting for element to be visible, enabled and stable
+       - element is visible, enabled and stable
+       - scrolling into view if needed
+       - done scrolling
+       - <input type="text" required="" name="query" autocorrect="off" autocomplete="off" spellcheck="false" aria-label="Search" placeholder="Search" autocapitalize="off" class="md-search__input" data-md-component="search-query"/> intercepts pointer events
+     - retrying click action
+       - waiting 500ms
+Error: Process completed with exit code 1.
+```
+## 2026-06-02 - hardening governance and drone pipeline validation
+Branch: main
+
+```text
+# SpectralBridge Package Hardening, Drone Pipeline Validation, Release Readiness, and Agent Governance
+
+## Mission
+
+SpectralBridge is evolving from a research codebase into reusable scientific infrastructure.
+
+The priorities of the project are:
+
+1. Correctness
+2. Reproducibility
+3. Restart safety
+4. Transparency
+5. Validation
+6. Maintainability
+7. Performance
+
+Performance optimizations should never compromise correctness, restartability, reproducibility, or QA transparency.
+
+The goal of this effort is not to redesign SpectralBridge.
+
+The goal is to strengthen and validate what already exists while preserving behavior.
+
+---
+
+# Priority 0 — Update AGENTS.md
+
+Before making technical changes, review and update AGENTS.md.
+
+The repository has reached a level of maturity where development process matters almost as much as implementation.
+
+Future work should be:
+
+- resumable
+- test-driven
+- reviewable
+- reproducible
+- restart-safe
+- maintainable
+
+---
+
+## Feature-Request-Driven Development
+
+Agents should treat:
+
+text FEATURE_REQUESTS.md 
+
+as the authoritative project work queue.
+
+Required workflow:
+
+1. Read FEATURE_REQUESTS.md.
+2. Select highest-priority unfinished item.
+3. Update FEATURE_REQUESTS.md before coding.
+4. Implement changes.
+5. Add tests.
+6. Update documentation if required.
+7. Update FEATURE_REQUESTS.md after completion.
+8. Record blockers and next steps.
+
+If interrupted:
+
+- document status
+- record remaining work
+- identify blockers
+- identify recommended next task
+
+Future agents should be able to resume immediately.
+
+---
+
+## Testing Expectations
+
+Work is not complete until:
+
+- tests exist
+- tests pass
+- regressions are protected
+
+Preference order:
+
+1. Regression tests
+2. Behavior tests
+3. Contract tests
+4. Integration tests
+5. Refactors
+
+New functionality without tests should be considered incomplete.
+
+---
+
+## Stability Requirements
+
+Agents should protect:
+
+- restart-safe execution
+- chunked processing
+- deterministic outputs
+- QA transparency
+- reproducibility
+
+Do not trade stability for implementation convenience.
+
+---
+
+## Package Philosophy
+
+SpectralBridge is scientific infrastructure.
+
+Agents should favor:
+
+- stable APIs
+- explicit validation
+- explicit status reporting
+- backward compatibility
+- additive improvements
+
+Avoid unnecessary breaking changes.
+
+---
+
+## Data Processing Philosophy
+
+Assume:
+
+- large datasets
+- cloud environments
+- HPC environments
+- CyVerse deployments
+- ACCESS allocations
+- laptops
+
+Preserve:
+
+- chunking
+- checkpointing
+- restart-safe behavior
+
+Avoid:
+
+- whole-scene loading
+- memory-intensive shortcuts
+
+unless clearly justified.
+
+---
+
+## HDF5 Contract Philosophy
+
+SpectralBridge starts from HDF5.
+
+Agents should not:
+
+- add TIFF conversion logic
+- repair malformed TIFF conversions
+
+Instead:
+
+- validate inputs
+- document assumptions
+- add regression tests
+
+Input contracts should be explicit.
+
+---
+
+## Documentation Expectations
+
+When public behavior changes:
+
+Update:
+
+- README
+- docs
+- examples
+- feature requests
+
+Documentation debt should not accumulate.
+
+---
+
+## Architecture Review Guidance
+
+Avoid speculative refactors.
+
+Before refactoring:
+
+- identify duplication
+- identify measurable benefit
+- create feature request
+- document rationale
+
+Large architecture changes should be deliberate.
+
+---
+
+## Public API Guidance
+
+Protect intentionally public APIs.
+
+Examples:
+
+python spectralbridge.go_forth_and_multiply spectralbridge.process_one_flightline spectralbridge.run_drone_pipeline 
+
+Distinguish:
+
+- public API
+- implementation details
+
+before making changes.
+
+---
+
+## CI Expectations
+
+If a regression could have been caught by CI:
+
+add a test.
+
+Any change affecting:
+
+text src/spectralbridge tests pyproject.toml workflows 
+
+should consider CI coverage.
+
+---
+
+## Leave-The-Camp-Cleaner Rule
+
+If an agent notices:
+
+- broken docs
+- stale comments
+- missing tests
+- dead code
+- obvious bugs
+
+they should either:
+
+- fix it
+- or create a feature request
+
+No known issue should disappear from project memory.
+
+---
+
+## End-of-Work Reporting
+
+At the end of work:
+
+update FEATURE_REQUESTS.md with:
+
+- completed items
+- deferred items
+- blockers
+- next recommended task
+
+---
+
+## SpectralBridge Development Motto
+
+Protect correctness.
+Preserve restartability.
+Prefer validation over assumptions.
+Leave a trail for the next agent.
+
+---
+
+# Project Context
+
+SpectralBridge processes:
+
+- NEON airborne hyperspectral data
+- drone hyperspectral data
+
+Drone workflows start from HDF5 inputs.
+
+A previously observed artifact was traced to an upstream TIFF→HDF5 conversion issue.
+
+The translator failed to correctly preserve orientation.
+
+This produced mirrored ancillary layers.
+
+The upstream translator has now been fixed.
+
+SpectralBridge should:
+
+- NOT add TIFF conversion
+- NOT repair malformed TIFF conversions
+- validate and document HDF5 contracts
+
+Chunking remains a required design principle.
+
+---
+
+# Priority 1 — HDF5 Orientation Contract Tests
+
+Add regression tests protecting HDF5 orientation assumptions.
+
+Requirements:
+
+Use:
+
+- tiny synthetic HDF5
+- non-square arrays
+- asymmetric values
+
+Example:
+
+text 11 12 13 14 21 22 23 24 31 32 33 34 
+
+Include:
+
+- reflectance
+- slope
+- aspect
+- solar_zn
+- solar_az
+- sensor_zn
+- sensor_az
+
+Verify:
+
+- reflectance alignment
+- ancillary alignment
+- transpose detection
+- diagonal mirror detection
+- row reversal detection
+- column reversal detection
+
+Document:
+
+This protects against upstream TIFF→HDF5 orientation regressions.
+
+---
+
+# Priority 2 — Spectral Axis Orientation Tests
+
+Protect _orient_cube() behavior.
+
+Test:
+
+text (lines, columns, bands) (bands, lines, columns) (lines, bands, columns) 
+
+Verify:
+
+- correct spectral-axis placement
+- no spatial correction
+- no mirroring
+- no row/column flipping
+
+---
+
+# Priority 3 — Ancillary Raster Contract Tests
+
+Protect ancillary shape assumptions.
+
+Verify:
+
+python cube.get_ancillary(...) 
+
+fails clearly when ancillary dimensions do not match:
+
+text (lines, columns) 
+
+Requirements:
+
+- explicit errors
+- actionable messages
+
+---
+
+# Priority 4 — Preserve Chunked Processing
+
+Chunking is required.
+
+Do not replace chunked processing with whole-scene loading.
+
+Preserve:
+
+- chunked reading
+- chunked correction
+- chunked extraction
+- restart-safe processing
+
+If full-raster extraction is added:
+
+- write chunk-by-chunk
+- avoid full-scene memory loads
+- preserve restart behavior
+
+---
+
+# Priority 5 — Per-Flight Parquet Validation
+
+Every successful flight should produce a per-flight parquet.
+
+Expected outputs:
+
+Polygon mode:
+
+text <flight_stem>__polygons.parquet 
+
+Full extraction:
+
+text <flight_stem>__extracted.parquet 
+
+Merged output:
+
+text drone_merged.parquet 
+
+Requirements:
+
+Review implementation.
+
+Verify behavior.
+
+Restore missing functionality using chunked processing if needed.
+
+Add QA metadata:
+
+- parquet path
+- merge path
+- CSV sidecar path
+- extraction status
+- skip reason
+- failure reason
+
+---
+
+# Priority 6 — Drone QA and Failure-State Tests
+
+Add:
+
+- orientation tests
+- polygon extraction tests
+- no-polygon extraction tests
+- chunking tests
+- CRS tests
+- overlap tests
+- metadata preservation tests
+- overlay image tests
+- correction failure tests
+- CSV failure tests
+
+Protect behavior through tests.
+
+---
+
+# Priority 7 — Restart, Checkpoint, and Recovery Integrity
+
+This is one of the most valuable guarantees in SpectralBridge.
+
+Add tests covering:
+
+### Partial restart
+
+Reuse completed work.
+
+### Corrupt intermediate recovery
+
+Rebuild corrupt outputs.
+
+### Missing downstream products
+
+Resume correctly.
+
+### Mixed-flight recovery
+
+Recover selectively.
+
+### Output validation
+
+Validate before skipping.
+
+### Explicit status reporting
+
+Support statuses such as:
+
+text skipped_existing_valid_output recomputed_missing_output recomputed_corrupt_output failed_validation 
+
+---
+
+# Priority 8 — Output Schema Stability
+
+Protect schema contracts.
+
+Required fields:
+
+text flightline_id row col x y band wavelength_nm fwhm_nm reflectance 
+
+Verify:
+
+- names
+- dtypes
+- presence
+
+Protect:
+
+- ENVI parquet
+- corrected parquet
+- merged parquet
+
+Verify polygon metadata survives extraction and merge.
+
+---
+
+# Priority 9 — Namespace and Container Compatibility
+
+Context:
+
+SpectralBridge runs in:
+
+- Docker
+- CyVerse
+- ACCESS
+- HPC
+- JupyterHub
+- cloud workspaces
+
+Compatibility-first.
+
+Keep:
+
+python import spectralbridge 
+
+canonical.
+
+Preserve:
+
+python import cross_sensor_cal 
+
+compatibility.
+
+Do not perform a breaking namespace migration.
+
+Add tests for:
+
+python import spectralbridge import cross_sensor_cal 
+
+and key public imports.
+
+Verify:
+
+- imports
+- warnings
+- compatibility
+
+Avoid:
+
+- hardcoded paths
+- cwd assumptions
+- repo-root assumptions
+
+Test CLI entry points.
+
+Document preferred namespace.
+
+---
+
+# Priority 10 — CI Hardening
+
+Expand CI coverage.
+
+Trigger on:
+
+text src/spectralbridge/** tests/** pyproject.toml .github/workflows/** 
+
+Run:
+
+bash pip install -e ".[tests]" ruff check src tests pytest -q tests/test_drone_pipeline.py pytest -q tests/test_qa python -c "import spectralbridge; print(spectralbridge.__version__)" 
+
+Optional:
+
+bash python -m build 
+
+Keep CI practical.
+
+---
+
+# Priority 11 — Logging Review
+
+Review:
+
+- duplicate handlers
+- notebook behavior
+- multiprocessing behavior
+- Ray behavior
+
+Document findings.
+
+Avoid major refactors.
+
+---
+
+# Priority 12 — Public API Contract Review
+
+Protect intentionally public APIs.
+
+Review whether current smoke tests are protecting the right contract.
+
+Avoid accidentally freezing internal helpers into public APIs.
+
+---
+
+# Priority 13 — Release Hygiene
+
+Audit:
+
+- LICENSE
+- README
+- CITATION
+- package resources
+- MANIFEST
+
+Verify:
+
+- no large datasets
+- no temporary outputs
+- no prompt logs
+- no development artifacts
+
+ship unintentionally.
+
+---
+
+# Priority 14 — Versioning Review
+
+Review:
+
+- pyproject version
+- package version
+- release process
+
+Prevent version drift.
+
+---
+
+# Priority 15 — Dependency Review
+
+Review:
+
+- ray
+- geopandas
+- rasterio
+
+Document whether extras make sense.
+
+Avoid breaking installs.
+
+---
+
+# Priority 16 — Documentation Modernization
+
+Prefer:
+
+python import spectralbridge 
+
+in examples.
+
+Retain compatibility documentation.
+
+Document:
+
+- HDF5 contract
+- chunking strategy
+- restart behavior
+- parquet authority
+- CSV sidecars
+- drone workflows
+- NEON workflows
+
+---
+
+# Priority 17 — Architecture Audit
+
+Perform a lightweight architecture review.
+
+Document findings only.
+
+Review:
+
+1. Duplicate metadata parsers
+2. Duplicate path builders
+3. Duplicate output discovery
+4. Multiple chunking implementations
+5. Restart-safe consistency
+6. QA consistency
+7. Shared drone/NEON infrastructure opportunities
+
+Create feature requests instead of large refactors.
+
+---
+
+# Constraints
+
+Do NOT:
+
+- add TIFF conversion logic
+- break NEON behavior
+- perform namespace migrations
+- perform speculative refactors
+- add large fixtures
+
+Prefer:
+
+- synthetic test data
+- tiny HDF5 fixtures
+- tiny rasters
+- tiny polygons
+
+Keep changes reviewable.
+
+---
+
+# Recommended Execution Order
+
+1. Update AGENTS.md
+2. Update FEATURE_REQUESTS.md
+3. Add HDF5 orientation tests
+4. Add ancillary contract tests
+5. Verify per-flight parquet behavior
+6. Restore chunked no-polygon extraction if required
+7. Add restart/checkpoint tests
+8. Add schema tests
+9. Expand CI
+10. Add namespace compatibility tests
+11. Perform hygiene review
+12. Perform architecture review
+13. Update docs
+
+---
+
+# Final Report Requirements
+
+Report:
+
+- AGENTS.md changes
+- FEATURE_REQUESTS.md changes
+- completed items
+- remaining items
+- blockers
+- tests added
+- CI updates
+- chunking status
+- parquet status
+- namespace status
+- restart-safe status
+- documentation updates
+- architecture findings
+- commands executed
+- test results
+- build results
+
+Explicitly confirm:
+
+- TIFF conversion was not added
+- NEON behavior was not changed
+- chunking was preserved
+- compatibility imports still work
+- package remains installable
+- tests pass
+```
+## 2026-06-02 - license migration and citation infrastructure audit
+Branch: main
+
+```text
+# SpectralBridge License Migration, Citation Infrastructure, and Open Science Documentation
+
+## Goal
+
+Prepare SpectralBridge for long-term scientific infrastructure use by transitioning to Apache License 2.0 and ensuring all related documentation, metadata, citation infrastructure, and release materials are consistent.
+
+This task is documentation-, governance-, and release-focused.
+
+Do not perform unrelated refactors.
+
+Do not modify scientific workflows, processing logic, chunking behavior, or pipeline architecture.
+
+---
+
+# First Step: Review Existing State
+
+Before making changes:
+
+Review:
+
+- LICENSE
+- README.md
+- CONTRIBUTING.md
+- AGENTS.md
+- FEATURE_REQUESTS.md
+- pyproject.toml
+- package metadata
+- GitHub templates
+- release documentation
+- existing citation files
+- existing DOI references
+
+Document current findings.
+
+Identify inconsistencies.
+
+Update FEATURE_REQUESTS.md with any discovered gaps before implementing changes.
+
+---
+
+# Target License
+
+Recommended target:
+
+text Apache License 2.0 
+
+Rationale:
+
+- NSF-compatible
+- Open science compatible
+- OSI-approved
+- Commercial use allowed
+- Modification allowed
+- Redistribution allowed
+- Explicit patent grant
+- Appropriate for scientific cyberinfrastructure
+- Preserves future commercialization opportunities
+
+---
+
+# License Audit
+
+Determine:
+
+1. Current repository license
+2. License references throughout repository
+3. Package metadata references
+4. Documentation references
+5. Release references
+
+Create a checklist of locations that require updates.
+
+---
+
+# Apache 2.0 Migration
+
+If repository maintainers approve migration:
+
+Update:
+
+- LICENSE
+- package metadata
+- pyproject.toml
+- README references
+- documentation references
+
+Ensure consistency everywhere.
+
+If legal review may be required:
+
+Document migration steps rather than making assumptions.
+
+Do not silently change legal ownership information.
+
+---
+
+# Add NOTICE File
+
+Review whether Apache 2.0 requires a NOTICE file for current repository content.
+
+If appropriate:
+
+Create:
+
+text NOTICE 
+
+Include:
+
+- project name
+- copyright holders
+- attribution information
+
+Keep content concise.
+
+---
+
+# Add CITATION.cff
+
+Create or update:
+
+text CITATION.cff 
+
+Include:
+
+- project title
+- project description
+- repository URL
+- preferred citation
+- authors
+- affiliations when available
+- version support
+- release support
+
+Use current repository metadata.
+
+If information is missing:
+
+Add TODO notes for maintainers.
+
+---
+
+# Software Citation Documentation
+
+Add a dedicated section to README.
+
+Example structure:
+
+## Citation
+
+If you use SpectralBridge in research, please cite:
+
+- the software release
+- associated publications
+- relevant methods papers
+
+Also reference:
+
+text CITATION.cff 
+
+as the authoritative citation source.
+
+---
+
+# DOI and Release Infrastructure Review
+
+Review current release process.
+
+Document:
+
+1. GitHub releases present?
+2. Release tags present?
+3. Semantic versioning used?
+4. DOI generation configured?
+5. Zenodo integration configured?
+6. Citation workflow documented?
+
+Create feature requests for any missing infrastructure.
+
+Do not create external accounts.
+
+Do not assume Zenodo is already configured.
+
+---
+
+# Open Science Documentation
+
+Add documentation describing:
+
+## Open Science Philosophy
+
+SpectralBridge is intended to be:
+
+- reusable scientific infrastructure
+- reproducible
+- transparent
+- community driven
+
+The project supports:
+
+- open science
+- reproducible workflows
+- software citation
+- interoperable data products
+
+## Licensing Philosophy
+
+The project uses Apache License 2.0 because it:
+
+- supports broad adoption
+- supports scientific collaboration
+- supports commercial use
+- supports future sustainability
+
+## Citation Philosophy
+
+Users should cite:
+
+- software releases
+- associated publications
+- relevant methods papers
+
+when using SpectralBridge in research.
+
+---
+
+# Commercialization Documentation
+
+Add a short documentation section explaining:
+
+Apache 2.0 does not prevent commercial use.
+
+Potential value-added services may include:
+
+- hosted processing
+- cloud deployment
+- workflow support
+- training
+- consulting
+- interoperability validation
+- sensor integration
+
+The software remains open source.
+
+This is compatible with both open science and commercial engagement.
+
+Keep this section brief and professional.
+
+---
+
+# AGENTS.md Updates
+
+Add guidance for future agents.
+
+Include:
+
+## Open Science Expectations
+
+Agents should consider:
+
+- reproducibility
+- software citation
+- documentation
+- release readiness
+- long-term maintainability
+
+when making changes.
+
+## Documentation Expectations
+
+Public behavior changes should update:
+
+- README
+- docs
+- citation files
+- release notes
+
+when appropriate.
+
+---
+
+# FEATURE_REQUESTS.md Updates
+
+Add durable feature requests for:
+
+- DOI integration
+- Zenodo configuration
+- release automation
+- citation improvements
+- publication tracking
+- software paper creation
+- long-term governance
+
+if these do not already exist.
+
+---
+
+# Release Hygiene Review
+
+Review repository for:
+
+- outdated license references
+- outdated project names
+- inconsistent branding
+- missing citation references
+- missing acknowledgements
+
+Document findings.
+
+Fix low-risk inconsistencies.
+
+Create feature requests for larger issues.
+
+---
+
+# Deliverables
+
+Update:
+
+- LICENSE
+- NOTICE (if appropriate)
+- README.md
+- CONTRIBUTING.md (if needed)
+- AGENTS.md
+- FEATURE_REQUESTS.md
+- CITATION.cff
+- package metadata
+
+Provide a final report including:
+
+- current license
+- migration actions taken
+- files updated
+- citation infrastructure status
+- DOI readiness
+- Zenodo readiness
+- open science readiness
+- commercialization readiness
+- remaining recommendations
+
+Do not modify scientific processing code as part of this task.
+
+Focus on governance, licensing, citation, documentation, and release infrastructure.
+```
+## 2026-06-02 - fix cli public api smoke regressions
+Branch: main
+
+```text
+Run pytest -q
+.................s....................................................ss [ 23%]
+ss........................................................FFF........... [ 47%]
+........................................................................ [ 70%]
+...................................................................s.... [ 94%]
+..................                                                       [100%]
+=================================== FAILURES ===================================
+_ test_public_function_import_and_signature_smoke[spectralbridge.cli.__init__.download_main] _
+
+module_name = 'spectralbridge.cli.__init__', function_name = 'download_main'
+
+    @pytest.mark.parametrize(
+        ("module_name", "function_name"),
+        PUBLIC_FUNCTIONS,
+        ids=[f"{module}.{name}" for module, name in PUBLIC_FUNCTIONS],
+    )
+    def test_public_function_import_and_signature_smoke(
+        module_name: str,
+        function_name: str,
+    ) -> None:
+>       module = _load_repo_module(module_name)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_public_api_smoke.py:113: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/test_public_api_smoke.py:79: in _load_repo_module
+    spec.loader.exec_module(module)
+<frozen importlib._bootstrap_external>:940: in exec_module
+    ???
+<frozen importlib._bootstrap>:241: in _call_with_frames_removed
+    ???
+src/spectralbridge/cli/__init__.py:9: in <module>
+    from .pipeline_cli import main as pipeline_cli_main
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+    """Command line entry point for the cross-sensor pipeline."""
+    from __future__ import annotations
+    
+    import argparse
+    from pathlib import Path
+    from typing import Sequence
+    
+    from spectralbridge._cli_compat import warn_if_legacy_command
+    
+>   from ..pipelines.pipeline import go_forth_and_multiply
+E   ModuleNotFoundError: No module named 'spectralbridge.cli.pipelines'
+
+src/spectralbridge/cli/pipeline_cli.py:10: ModuleNotFoundError
+_ test_public_function_import_and_signature_smoke[spectralbridge.cli.__init__.pipeline_main] _
+
+module_name = 'spectralbridge.cli.__init__', function_name = 'pipeline_main'
+
+    @pytest.mark.parametrize(
+        ("module_name", "function_name"),
+        PUBLIC_FUNCTIONS,
+        ids=[f"{module}.{name}" for module, name in PUBLIC_FUNCTIONS],
+    )
+    def test_public_function_import_and_signature_smoke(
+        module_name: str,
+        function_name: str,
+    ) -> None:
+        module = _load_repo_module(module_name)
+>       function = getattr(module, function_name)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'spectralbridge.cli.__init__' has no attribute 'pipeline_main'
+
+tests/test_public_api_smoke.py:114: AttributeError
+_ test_public_function_import_and_signature_smoke[spectralbridge.cli.__init__.qa_main] _
+
+module_name = 'spectralbridge.cli.__init__', function_name = 'qa_main'
+
+    @pytest.mark.parametrize(
+        ("module_name", "function_name"),
+        PUBLIC_FUNCTIONS,
+        ids=[f"{module}.{name}" for module, name in PUBLIC_FUNCTIONS],
+    )
+    def test_public_function_import_and_signature_smoke(
+        module_name: str,
+        function_name: str,
+    ) -> None:
+        module = _load_repo_module(module_name)
+>       function = getattr(module, function_name)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: module 'spectralbridge.cli.__init__' has no attribute 'qa_main'
+
+tests/test_public_api_smoke.py:114: AttributeError
+=============================== warnings summary ===============================
+src/spectralbridge/polygons.py:21
+  /home/runner/work/spectralbridge/spectralbridge/src/spectralbridge/polygons.py:21: DeprecationWarning: cross_sensor_cal is deprecated; use spectralbridge instead.
+    from cross_sensor_cal.exports.schema_utils import ensure_coord_columns
+
+tests/test_drone_pipeline.py::test_render_drone_panel_logs_sampling_debug_and_writes_debug_payload
+  /home/runner/work/spectralbridge/spectralbridge/src/spectralbridge/qa_plots.py:2233: RuntimeWarning: All-NaN slice encountered
+    return np.nanmedian(masked, axis=(1, 2))
+
+tests/test_drone_pipeline.py::test_render_drone_panel_logs_sampling_debug_and_writes_debug_payload
+  /home/runner/work/spectralbridge/spectralbridge/src/spectralbridge/qa_plots.py:388: RuntimeWarning: All-NaN slice encountered
+    delta_median = np.nanmedian(diff, axis=1)
+
+tests/test_drone_pipeline.py::test_render_drone_panel_logs_sampling_debug_and_writes_debug_payload
+tests/test_drone_pipeline.py::test_render_drone_correction_magnitude_returns_richer_spatial_summary
+  /opt/hostedtoolcache/Python/3.11.15/x64/lib/python3.11/site-packages/numpy/lib/_nanfunctions_impl.py:1593: RuntimeWarning: All-NaN slice encountered
+    return fnb._ureduce(a,
+
+tests/test_drone_pipeline.py::test_render_drone_panel_logs_sampling_debug_and_writes_debug_payload
+  /home/runner/work/spectralbridge/spectralbridge/src/spectralbridge/qa_plots.py:393: RuntimeWarning: All-NaN slice encountered
+    delta_abs_median = np.nanmedian(np.abs(diff), axis=1)
+
+tests/test_drone_pipeline.py::test_render_drone_correction_magnitude_returns_richer_spatial_summary
+  /home/runner/work/spectralbridge/spectralbridge/src/spectralbridge/qa_plots.py:2385: RuntimeWarning: All-NaN slice encountered
+    abs_delta = np.nanmedian(full_abs_diff, axis=0)
+
+tests/test_pipeline_convolution.py::test_pipeline_idempotence_skip_behavior
+  /opt/hostedtoolcache/Python/3.11.15/x64/lib/python3.11/site-packages/opentelemetry/util/_importlib_metadata.py:32: DeprecationWarning: SelectableGroups dict interface is deprecated. Use select.
+    return EntryPoints(ep for group_eps in eps.values() for ep in group_eps)
+
+tests/test_pipeline_convolution.py::test_pipeline_idempotence_skip_behavior
+  /opt/hostedtoolcache/Python/3.11.15/x64/lib/python3.11/site-packages/ray/_private/worker.py:2051: FutureWarning: Tip: In future versions of Ray, Ray will no longer override accelerator visible devices env var if num_gpus=0 or num_gpus=None (default). To enable this behavior and turn off this error message, set RAY_ACCEL_ENV_VAR_OVERRIDE_ON_ZERO=0
+    warnings.warn(
+
+tests/test_polygon_pipeline.py::test_build_polygon_pixel_index
+tests/test_polygon_pipeline.py::test_extract_polygon_parquets_for_flightline
+tests/test_polygon_pipeline.py::test_merge_polygon_parquets_for_flightline
+tests/test_polygon_pipeline.py::test_run_polygon_pipeline_for_flightline
+  /home/runner/work/spectralbridge/spectralbridge/src/spectralbridge/polygons.py:1714: Pandas4Warning: The copy keyword is deprecated and will be removed in a future version. Copy-on-Write is active in pandas since 3.0 which utilizes a lazy copy mechanism that defers copies until necessary. Use .copy() to make an eager copy if necessary.
+    polygon_ids = polygons["polygon_id"].astype("int64", copy=False)
+
+tests/test_qa/test_qa_metrics_smoke.py::test_render_panel_writes_png_and_json
+tests/test_qa/test_qa_metrics_smoke.py::test_metrics_arrays_are_serialisable
+  /home/runner/work/spectralbridge/spectralbridge/src/spectralbridge/qa_plots.py:1236: UserWarning: Glyph 10060 (\\N{CROSS MARK}) missing from font(s) DejaVu Sans Mono.
+    pdf.savefig(fig, bbox_inches="tight")
+
+tests/test_qa/test_qa_metrics_smoke.py::test_render_panel_writes_png_and_json
+tests/test_qa/test_qa_metrics_smoke.py::test_metrics_arrays_are_serialisable
+  /home/runner/work/spectralbridge/spectralbridge/src/spectralbridge/qa_plots.py:1236: UserWarning: Glyph 65039 (\\N{VARIATION SELECTOR-16}) missing from font(s) DejaVu Sans Mono.
+    pdf.savefig(fig, bbox_inches="tight")
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/test_public_api_smoke.py::test_public_function_import_and_signature_smoke[spectralbridge.cli.__init__.download_main] - ModuleNotFoundError: No module named 'spectralbridge.cli.pipelines'
+FAILED tests/test_public_api_smoke.py::test_public_function_import_and_signature_smoke[spectralbridge.cli.__init__.pipeline_main] - AttributeError: module 'spectralbridge.cli.__init__' has no attribute 'pipeline_main'
+FAILED tests/test_public_api_smoke.py::test_public_function_import_and_signature_smoke[spectralbridge.cli.__init__.qa_main] - AttributeError: module 'spectralbridge.cli.__init__' has no attribute 'qa_main'
+(raylet) [2026-06-02 21:45:10,922 I 2902 2902] logging.cc:303: Set ray log level from environment variable RAY_BACKEND_LOG_LEVEL to 2 [repeated 4x across cluster] (Ray deduplicates logs by default. Set RAY_DEDUP_LOGS=0 to disable log deduplication, or see https://docs.ray.io/en/master/ray-observability/user-guides/configure-logging.html#log-deduplication for more options.)
+Error: Process completed with exit code 1.
+```
+
+## 2026-06-02 - replace docs hero image
+Branch: main
+
+```text
+Here is a replacement for the hero image
+```
+
+## 2026-06-02 - remove public cross-sensor-cal references
+Branch: main
+
+```text
+the website still opens with SpectralBridge (formerly cross-sensor-cal)  even though we were supposed to get rid of all the cross sensor cal references.
+```
+
+## 2026-06-02 - homepage refresh
+Branch: main
+
+```text
+# SpectralBridge Homepage Refresh
+
+## Goal
+
+Redesign the SpectralBridge homepage so it feels like a mature scientific infrastructure platform rather than a research software repository.
+
+The homepage should communicate:
+
+- scientific credibility
+- ease of use
+- interoperability
+- reproducibility
+- scalability
+- open science
+
+The visual style should align more closely with modern scientific infrastructure projects such as:
+
+- Jupyter
+- xarray
+- Apache Arrow
+- QGIS
+- Planetary Computer
+
+and fit within the broader Earth Lab / ESIIL ecosystem.
+
+Use the new SpectralBridge hero banner and simplified logo.
+
+Do not focus the homepage on technical implementation details such as BRDF correction, topographic correction, file formats, or internal processing steps.
+
+Focus on outcomes and value.
+
+---
+
+# Hero Section
+
+Use the new wide SpectralBridge banner graphic.
+
+Hero text:
+
+## SpectralBridge
+
+### Connect drone, airborne, and satellite observations through a single reproducible workflow.
+
+Process hyperspectral imagery across sensors, ecosystems, and scales using transparent, scalable, and scientifically defensible methods.
+
+Buttons:
+
+- Get Started
+- Documentation
+- Example Workflow
+
+---
+
+# What Is SpectralBridge?
+
+Section title:
+
+## What is SpectralBridge?
+
+Body text:
+
+SpectralBridge is an open-source platform for transforming raw hyperspectral imagery into analysis-ready data products.
+
+Whether you're working with drone surveys, airborne campaigns, ecological observatories, or future sensor systems, SpectralBridge provides a common framework for correction, harmonization, extraction, quality assurance, and analysis.
+
+By creating consistent workflows across sensors and scales, SpectralBridge helps researchers focus on science rather than data wrangling.
+
+---
+
+# Why SpectralBridge?
+
+Create a three-card section.
+
+## Cross-Sensor Interoperability
+
+Compare and integrate measurements collected by drones, aircraft, ecological observatories, and future sensor systems using a common analytical framework.
+
+## Reproducible Science
+
+Every processing step is transparent, documented, and designed to support repeatable scientific workflows.
+
+## Scalable Infrastructure
+
+Run locally, in containers, on cloud platforms, or on high-performance computing systems without changing your workflow.
+
+---
+
+# Workflow Section
+
+Title:
+
+## From Raw Data to Analysis-Ready Products
+
+Subtitle:
+
+A transparent workflow for transforming hyperspectral imagery into scientifically defensible data products.
+
+Workflow diagram:
+
+text Raw Data ↓ Quality Assessment ↓ Correction & Harmonization ↓ Extraction & Summarization ↓ Analysis-Ready Products 
+
+Supporting text:
+
+SpectralBridge helps standardize hyperspectral processing while preserving transparency, reproducibility, and scientific traceability at every step.
+
+---
+
+# Supported Platforms
+
+Title:
+
+## Built for Environmental Observations Across Scales
+
+Create four cards.
+
+### Drone Systems
+
+Process hyperspectral imagery collected from low-altitude drone platforms.
+
+### Airborne Campaigns
+
+Support regional airborne surveys and research aircraft missions.
+
+### NEON Airborne Observation Platform
+
+Work directly with NEON hyperspectral products using dedicated workflows.
+
+### Future Sensors
+
+Designed to support emerging environmental sensing technologies and evolving data standards.
+
+---
+
+# Scientific Applications
+
+Title:
+
+## Scientific Applications
+
+Intro text:
+
+SpectralBridge supports a wide range of environmental monitoring and research applications.
+
+Applications grid:
+
+- Biodiversity Monitoring
+- Ecosystem Change Detection
+- Vegetation Functional Traits
+- Wildfire Science
+- Restoration Ecology
+- Carbon Dynamics
+- Remote Sensing Validation
+- Long-Term Ecological Monitoring
+
+---
+
+# Open Science Section
+
+Title:
+
+## Open Science by Design
+
+Body text:
+
+SpectralBridge is built as open scientific infrastructure.
+
+The project emphasizes:
+
+- Transparency
+- Reproducibility
+- Interoperability
+- Scalability
+- Community Contribution
+
+All workflows are designed to support reproducible environmental data science and long-term scientific reuse.
+
+Buttons:
+
+- View Source Code
+- Citation Information
+
+---
+
+# Call to Action
+
+Title:
+
+## Build Once. Compare Everywhere.
+
+Body text:
+
+SpectralBridge helps connect environmental observations across sensors, ecosystems, and scales through transparent and reproducible workflows.
+
+Buttons:
+
+- Get Started
+- Explore Examples
+
+---
+
+# Footer
+
+Retain the overall footer structure already used across the broader Earth Lab / ESIIL ecosystem.
+
+Do not invent new partner organizations.
+
+Reuse existing footer content, logos, acknowledgements, and funding language where appropriate.
+
+Ensure visual consistency with:
+
+- Earth Lab
+- ESIIL
+- OASIS
+
+The footer should make SpectralBridge feel like part of a larger scientific infrastructure ecosystem rather than a standalone software project.
+
+---
+
+# Design Guidance
+
+The homepage should feel:
+
+- open
+- modern
+- scientific
+- welcoming
+- trustworthy
+
+Avoid:
+
+- dense walls of text
+- excessive jargon
+- implementation details
+- overly technical introductions
+
+Prioritize:
+
+- clear value proposition
+- visual hierarchy
+- whitespace
+- accessibility
+- mobile responsiveness
+
+The first impression should be:
+
+"SpectralBridge helps me connect and compare hyperspectral observations across sensors and scales."
+
+not:
+
+"SpectralBridge performs BRDF correction."
+
+The science outcomes are the story. The processing details belong in the documentation.
+```
+
+## 2026-06-02 - replace header logo
+Branch: main
+
+```text
+here is a logo for the header to replace the current header logo which seems to be using the hero
+```
+
+## 2026-06-02 - replace favicon
+Branch: main
+
+```text
+favicon
+```
+
+## 2026-06-02 - oasis-style footer
+Branch: main
+
+```text
+can you get all the assests from this repo and make a footer like this [CU-ESIIL/Project_group_OASIS](https://github.com/CU-ESIIL/Project_group_OASIS)
+```
+
+## 2026-06-02 - fix docs homepage h1 smoke test
+Branch: main
+
+```text
+Run python -m http.server 8000 --directory site > /tmp/spectralbridge-docs-http.log 2>&1 &
+F                                                                        [100%]
+=================================== FAILURES ===================================
+_________________ test_docs_site_core_pages_render_in_browser __________________
+
+    def test_docs_site_core_pages_render_in_browser() -> None:
+        base_url = _docs_site_url()
+
+        try:
+            from playwright.sync_api import sync_playwright
+        except Exception as exc:  # pragma: no cover - depends on local environment
+            raise AssertionError(
+                "Playwright is required for docs browser smoke tests. "
+                "Install pytest-playwright/playwright and Chromium."
+            ) from exc
+
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch()
+            page = browser.new_page(viewport={"width": 1280, "height": 900})
+            page_errors, console_errors, failed_assets = _collect_page_health(page, base_url)
+
+            try:
+                page.goto(base_url, wait_until="networkidle")
+                assert "SpectralBridge" in page.title()
+>               assert page.locator("h1#spectralbridge").is_visible()
+E               AssertionError: assert False
+E                +  where False = is_visible()
+E                +    where is_visible = <Locator frame=<Frame name= url='http://127.0.0.1:8000/'> selector='h1#spectralbridge'>.is_visible
+E                +      where <Locator frame=<Frame name= url='http://127.0.0.1:8000/'> selector='h1#spectralbridge'> = locator('h1#spectralbridge')
+E                +        where locator = <Page url='http://127.0.0.1:8000/'>.locator
+
+tests/test_docs_playwright.py:67: AssertionError
+=========================== short test summary info ============================
+FAILED tests/test_docs_playwright.py::test_docs_site_core_pages_render_in_browser - AssertionError: assert False
+ +  where False = is_visible()
+ +    where is_visible = <Locator frame=<Frame name= url='http://127.0.0.1:8000/'> selector='h1#spectralbridge'>.is_visible
+ +      where <Locator frame=<Frame name= url='http://127.0.0.1:8000/'> selector='h1#spectralbridge'> = locator('h1#spectralbridge')
+ +        where locator = <Page url='http://127.0.0.1:8000/'>.locator
+Error: Process completed with exit code 1.
+```
+
+## 2026-06-02 - homepage quality redesign pass
+Branch: main
+
+```text
+this is not a great homepage
+```
+
+## 2026-06-02 - homepage layout and header cleanup
+Branch: main
+
+```text
+the homepage content is leaving room for a sidebar but there is not side bar. also, the header logo is way too small so you can read it and the logo had the name and then the text repeats the name in the header
+```
+
+## 2026-06-02 - docs consistency and workflow accuracy
+Branch: main
+
+```text
+i think these arrows are not going the correct direction. also, the quick start page looks like the old design. can you make all the sub pages match the primary page and also make sure that the the sub pages are up to date with the real details in the package.
+```
+
+## 2026-06-02 - work through feature requests
+Branch: main
+
+```text
+start working through all the feature requests and do any that you're able to. remove a task from the list if it's done. our goal is to finish all the feature requests but don't do anything that will break the functionality so skip the feature request if you think it will break something. We want this to be publication quality, so do the best you can at making it perfect on the first try.
+```
+
+## 2026-06-03 - continue next feature request
+Branch: main
+
+```text
+do the next one
+```
+
+## 2026-06-03 - continue next feature request
+Branch: main
+
+```text
+do the next
+```
+
+## 2026-06-03 - zenodo doi badge update
+Branch: main
+
+```text
+now p18 but I think we already have a zenodo doi for this and we just need to update the badge
+```
+
+## 2026-06-03 - release automation and notes
+Branch: main
+
+```text
+do the next thing
+```
+
+## 2026-06-03 - software citation and publication tracking
+Branch: main
+
+```text
+do the next thing
+```
+
+## 2026-06-03 - mixed drone tiff or h5 input support
+Branch: main
+
+```text
+I want to change the drone pipeline so that it can take the tiff and do the conversion of it can take the h5. The function should recognize which is coming in and treat accordingly
+```
+
+## 2026-06-03 - mixed drone input cleanup retry
+Branch: main
+
+```text
+try again
+```
+
+## 2026-06-03 - drone polygon parquet schema stabilization
+Branch: main
+
+```text
+Fix drone polygon extraction Parquet schema instability.
+
+Problem:
+The drone pipeline now reaches polygon extraction correctly, but chunked Parquet writing fails when polygon metadata columns have all-null values in one chunk and strings in another. PyArrow then infers conflicting schemas, e.g. species: null vs species: string, cover_subcategory: null vs string, dead_subcategory: null vs string.
+
+Task:
+Make polygon extraction write a stable schema across chunks.
+
+Requirements:
+- Locate the chunked polygon Parquet writing path used by extract_polygon_parquet_from_envi.
+- Before writing each chunk, normalize polygon attribute columns to stable dtypes.
+- Text/object/categorical polygon metadata columns should be string dtype even when all values are missing in a chunk.
+- Preserve numeric columns as numeric.
+- Preserve datetime columns as timestamp.
+- Preserve geometry WKB as binary.
+- Preserve polygon_id as integer.
+- Do not convert all columns blindly to string.
+- Ensure the first chunk cannot lock a text field to Arrow null type.
+- Add a regression test using a polygon file where one chunk has all-null species/cover_subcategory/dead_subcategory and a later chunk has strings.
+- Test should fail before the fix and pass after.
+- Keep NEON behavior unchanged unless the same shared polygon extraction writer is intentionally made safer for both.
+- Add a clear comment explaining that this protects chunked Parquet writes from null-only chunk schema inference.
+
+Run:
+pytest -q tests/test_drone_pipeline.py
+pytest -q tests/test_polygons.py
+ruff check src tests
+```
+
+## 2026-06-03 - drone qa panel labeling cleanup
+Branch: main
+
+```text
+i think we can remove it and make sure all the plots in the qa plot are properly labelled.
+```
+
+## 2026-06-03 - finish p16 and p24
+Branch: main
+
+```text
+do those two
+```
+
+## 2026-06-09 - aop qa png redesign
+Branch: main
+
+```text
+let's do that.
+```
+
+## 2026-06-09 - drone manifest solar geometry
+Branch: main
+
+```text
+# Codex Prompt: Restore Drone Solar Geometry Using Flight Manifest CSV
+
+## Background
+
+The SpectralBridge drone workflow is intentionally designed as a thin adapter around the existing NEON AOP pipeline.
+
+The architecture is:
+
+text Drone TIFF + ancillary data     ↓ convert_drone_tiff_to_h5()     ↓ NEON-like H5     ↓ Standard SpectralBridge pipeline     ↓ ENVI     ↓ Topo / BRDF correction     ↓ QA     ↓ Extraction 
+
+The standard pipeline should remain unchanged.
+
+The goal of this PR is to improve the drone adapter so that it produces a more complete NEON-equivalent H5 by computing solar geometry when it is not explicitly supplied.
+
+---
+
+## Problem
+
+Historically the drone workflow used a flight timestamp (date_time_str) to compute:
+
+text Solar_Zenith_Angle Solar_Azimuth_Angle 
+
+before writing the H5.
+
+The current package implementation supports:
+
+python solar_zenith_tiff solar_azimuth_tiff sensor_zenith_tiff sensor_azimuth_tiff 
+
+or scalar angle inputs, but does not automatically compute solar geometry from acquisition time.
+
+As a result:
+
+- drone H5 files may have missing solar geometry
+- topo/BRDF correction may run with incomplete metadata
+- the resulting H5 is structurally similar to NEON but not fully equivalent
+
+---
+
+## New Input
+
+Assume the user provides:
+
+python drone_manifest_path="Drone Field Data Macrosystems - UAS Data Processing For Extraction.csv" 
+
+The CSV contains flight metadata including:
+
+text Plot Day of data collection Mean Time of data collection (24 hr clock) 
+
+Example:
+
+text AOP_GOLDHILL 2023-08-15 19:53:07  AOP_GORDON 2023-08-15 20:58:39  AOP_RUBY 2023-08-16 18:53:18 
+
+The CSV should become the authoritative source of acquisition datetime information for drone flights.
+
+---
+
+## Required Changes
+
+### 1. Add manifest support to run_drone_pipeline()
+
+Add optional argument:
+
+python drone_manifest_path: str | Path | None = None 
+
+Pass this through to the TIFF → H5 conversion stage.
+
+Do not require it for existing workflows.
+
+---
+
+### 2. Create a manifest loader
+
+New helper:
+
+python load_drone_manifest() 
+
+Responsibilities:
+
+- read CSV
+- normalize flight identifiers
+- parse acquisition datetime
+- build lookup dictionary
+
+Return:
+
+python {     "AOP_GOLDHILL": datetime(...),     "AOP_GORDON": datetime(...),     ... } 
+
+Handle:
+
+- whitespace
+- mixed separators
+- missing rows
+- malformed dates
+
+Provide informative warnings.
+
+---
+
+### 3. Add flight lookup helper
+
+Create:
+
+python lookup_flight_datetime(     flight_id,     manifest ) 
+
+This should match:
+
+text AOP_GOLDHILL_20230814 
+
+to
+
+text AOP_GOLDHILL 
+
+and return the acquisition datetime.
+
+Document matching rules.
+
+---
+
+### 4. Restore solar geometry computation
+
+Inside:
+
+python convert_drone_tiff_to_h5() 
+
+Add logic:
+
+### Priority 1
+
+Use supplied:
+
+python solar_zenith_tiff solar_azimuth_tiff 
+
+if present.
+
+### Priority 2
+
+Use supplied scalar angles if present.
+
+### Priority 3
+
+If no solar geometry exists:
+
+python acquisition_datetime + pixel lat/lon 
+
+compute:
+
+python Solar_Zenith_Angle Solar_Azimuth_Angle 
+
+for every pixel.
+
+Write these datasets into the generated H5 using the same names expected by the standard AOP pipeline.
+
+### Priority 4
+
+If geometry still cannot be produced:
+
+raise a clear error when correction is requested.
+
+---
+
+## Coordinate Requirements
+
+Use the raster CRS and transform to generate:
+
+python longitude latitude 
+
+for each pixel.
+
+Avoid assumptions about projection.
+
+Use rasterio / pyproj utilities already present in the project where possible.
+
+---
+
+## QA Improvements
+
+Add fields to QA JSON:
+
+json {   "solar_geometry_source": "...",   "acquisition_datetime_used": "...",   "solar_zenith_mean": ...,   "solar_zenith_min": ...,   "solar_zenith_max": ...,   "solar_azimuth_mean": ...,   "solar_azimuth_min": ...,   "solar_azimuth_max": ... } 
+
+Allowed values:
+
+text solar_geometry_source:  raster scalar manifest_computed missing 
+
+---
+
+## Failure Behavior
+
+Add:
+
+python require_solar_geometry: bool = True 
+
+If:
+
+python apply_topo=True 
+
+or
+
+python apply_brdf=True 
+
+and no geometry exists:
+
+text raise RuntimeError 
+
+unless:
+
+python require_solar_geometry=False 
+
+---
+
+## Testing
+
+Add minimal tests.
+
+### Test 1
+
+Manifest loading:
+
+python AOP_GOLDHILL → datetime parsed correctly 
+
+### Test 2
+
+Flight lookup:
+
+python AOP_GOLDHILL_20230814 → AOP_GOLDHILL 
+
+### Test 3
+
+Manifest-derived geometry:
+
+Synthetic raster
+
+→ geometry computed
+
+→ datasets written to H5
+
+### Test 4
+
+Missing geometry
+
+Correction requested
+
+→ clear exception raised
+
+---
+
+## Design Constraints
+
+- Do not modify the standard NEON pipeline.
+- Keep all changes inside the drone adapter layer.
+- Maintain backwards compatibility.
+- Preserve existing workflows that already provide solar angle rasters.
+- Make the generated drone H5 as semantically equivalent to a NEON AOP H5 as possible.
+- Add clear logging and QA reporting so users can determine exactly where solar geometry originated.
+```
+
+## 2026-06-10 - validate drone field manifest
+Branch: main
+
+```text
+here is the manifest.
+```
+
+## 2026-06-10 - drone manifest relative path error
+Branch: main
+
+```text
+Attached traceback shows run_drone_pipeline(..., drone_manifest_path="Drone Field Data Macrosystems - UAS Data Processing For Extraction.csv") failing with FileNotFoundError because the relative manifest CSV path was not found from the notebook working directory.
+```
+
+## 2026-06-10 - drone manifest input-dir fallback
+Branch: main
+
+```text
+Traceback shows the improved drone_manifest_path error only checked the notebook working directory and the raw relative filename, but did not check the relative input_h5_dir folder (`drone_inputs`) for the manifest CSV.
+```
+
+## 2026-06-10 - update aop qa png phash baseline
+Branch: main
+
+```text
+Run pytest tests/test_qa -q
+...F                                                                     [100%]
+test_panel_phash_matches_baseline failed because the AOP QA PNG perceptual hash no longer matches the old baseline after the redesigned QA panel.
+```
+
+## 2026-06-10 - bundle drone manifest
+Branch: main
+
+```text
+re: drone_manifest_path yes, put it in the repo and refernce the code to it
+```
+
+## 2026-06-10 - docs playwright 403 console errors
+Branch: main
+
+```text
+Run python -m http.server 8000 --directory site > /tmp/spectralbridge-docs-http.log 2>&1 &
+test_docs_site_core_pages_render_in_browser failed because console_errors contained two "Failed to load resource: the server responded with a status of 403 ()" entries.
+```
+
+## 2026-06-10 - drone empty input discovery clarity
+Branch: main
+
+```text
+[drone] Skipping manifest row 31 for MTST_11 with malformed acquisition datetime: 'nan' 'nan'
+[drone] Skipping manifest row 46 with missing Plot value in [/home/jovyan/data-store/spectralbridge/src/spectralbridge/data/drone_field_manifest.csv](https://afa48b26d.cyverse.run/lab/tree/spectralbridge/spectralbridge/src/spectralbridge/data/drone_field_manifest.csv)
+Processed: 0
+Failed: 0
+Merged parquet: None
+QA summary: drone_outputs/drone_qa_summary.json
+{'attempted_total': 0,
+ 'brightness_adjustment_applied': False,
+ 'brightness_adjustment_requested': False,
+ 'brightness_offset': 0.0,
+ 'cloud_mask_applied': False,
+ 'convolution': 'skipped',
+ 'discovered_total': 0,
+ 'drone_manifest_path': '/home/jovyan/data-store/spectralbridge/src/spectralbridge/data/drone_field_manifest.csv',
+ 'files': [],
+ 'ndvi_brdf_bins_enabled': False,
+ 'platform': 'drone',
+ 'polygon_path': 'Datasets/niwot_aop_polygons_2023_12_8_23_analysis_ready_half_diam.gpkg',
+ 'require_solar_geometry': True,
+ 'run_root': 'drone_outputs'}
+```
+
+## 2026-06-11 - CI full test failure log
+Branch: main
+
+```text
+Attached pasted-text.txt shows full pytest failure log with drone pipeline, parquet export, Ray engine, polygon ArrowDtype, and stage export failures after recent changes.
 ```

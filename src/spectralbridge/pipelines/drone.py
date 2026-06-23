@@ -7,8 +7,10 @@ import re
 import shutil
 import sys
 import time
+from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Sequence
 
 import duckdb
 import h5py
@@ -33,6 +35,7 @@ from spectralbridge.polygons import (
     validate_coordinate_match,
 )
 from spectralbridge.progress_utils import TileProgressReporter
+from spectralbridge.utils.paths import get_package_data_path
 from spectralbridge.utils_checks import is_valid_envi_pair
 
 from cross_sensor_cal.exports.schema_utils import ensure_coord_columns
@@ -69,6 +72,38 @@ _DRONE_NODATA_PATCH_ATTRS = (
 )
 _DRONE_FALLBACK_NODATA = np.float32(-9999.0)
 _DRONE_PACKAGE_DATE_RE = re.compile(r"(?P<month>\d{2})-(?P<day>\d{2})-(?P<year>\d{2})")
+_DRONE_TIFF_DEFAULT_WAVELENGTHS_NM = (
+    444.0,
+    475.0,
+    531.0,
+    560.0,
+    650.0,
+    668.0,
+    705.0,
+    717.0,
+    740.0,
+    862.0,
+)
+_DRONE_TIFF_DEFAULT_FWHM_NM = (
+    28.0,
+    32.0,
+    14.0,
+    27.0,
+    16.0,
+    14.0,
+    10.0,
+    12.0,
+    18.0,
+    57.0,
+)
+_DRONE_TIFF_ANCILLARY_KEYWORDS = {
+    "slope": (("slope",),),
+    "aspect": (("aspect",),),
+    "sensor_zenith": (("sensor", "zenith"), ("view", "zenith")),
+    "sensor_azimuth": (("sensor", "azimuth"), ("view", "azimuth")),
+    "solar_zenith": (("solar", "zenith"), ("sun", "zenith")),
+    "solar_azimuth": (("solar", "azimuth"), ("sun", "azimuth")),
+}
 _DRONE_STATUS_SUCCESS_EXTRACTED = "success_extracted"
 _DRONE_STATUS_SUCCESS_QA_ONLY_NO_OVERLAP = "success_qa_only_no_polygon_overlap"
 _DRONE_STATUS_SUCCESS_QA_ONLY_NO_POLYGONS = "success_qa_only_no_polygons"
@@ -81,6 +116,25 @@ _ANSI_RESET = "\033[0m"
 _ANSI_GREEN = "\033[32m"
 _ANSI_YELLOW = "\033[33m"
 _ANSI_RED = "\033[31m"
+_DRONE_MANIFEST_ID_COLUMN = "Plot"
+_DRONE_MANIFEST_DATE_COLUMN = "Day of data collection"
+_DRONE_MANIFEST_TIME_COLUMN = "Mean Time of data collection (24 hr clock)"
+_DRONE_DEFAULT_MANIFEST_FILENAME = "drone_field_manifest.csv"
+_DRONE_DEFAULT_MANIFEST_ALIASES = {
+    _DRONE_DEFAULT_MANIFEST_FILENAME,
+    "Drone Field Data Macrosystems - UAS Data Processing For Extraction.csv",
+}
+_DRONE_SUPPORTED_INPUT_EXTENSIONS = (".h5", ".tif", ".tiff")
+_DRONE_SOLAR_GEOMETRY_ATTRS = (
+    "solar_geometry_source",
+    "acquisition_datetime_used",
+    "solar_zenith_mean",
+    "solar_zenith_min",
+    "solar_zenith_max",
+    "solar_azimuth_mean",
+    "solar_azimuth_min",
+    "solar_azimuth_max",
+)
 
 
 class DroneCorrectionUnavailableError(RuntimeError):
@@ -89,6 +143,212 @@ class DroneCorrectionUnavailableError(RuntimeError):
     def __init__(self, message: str, audit: dict[str, Any]):
         super().__init__(message)
         self.audit = dict(audit)
+
+
+@dataclass(frozen=True)
+class DroneInputSource:
+    source_path: Path
+    source_type: str
+    flight_stem: str
+
+
+def _normalise_drone_manifest_id(value: Any) -> str:
+    """Normalize manifest/package identifiers for tolerant flight matching."""
+
+    if value is None or pd.isna(value):
+        return ""
+    normalized = re.sub(r"[^A-Za-z0-9]+", "_", str(value or "").strip().upper())
+    normalized = re.sub(r"_+", "_", normalized).strip("_")
+    return normalized
+
+
+def _compact_drone_manifest_id(value: str) -> str:
+    """Return an alphanumeric-only key for separator-tolerant matching."""
+
+    return re.sub(r"[^A-Z0-9]+", "", value.upper())
+
+
+def _strip_trailing_manifest_date(value: str) -> str:
+    """Remove a trailing date token used in derived drone flight stems."""
+
+    return re.sub(r"[_-]?\d{8}$", "", value).strip("_-")
+
+
+def _find_manifest_column(columns: Sequence[str], expected: str) -> str | None:
+    expected_norm = re.sub(r"[^a-z0-9]+", "", expected.lower())
+    for column in columns:
+        column_norm = re.sub(r"[^a-z0-9]+", "", str(column).lower())
+        if column_norm == expected_norm:
+            return str(column)
+    return None
+
+
+def load_drone_manifest(manifest_path: str | Path) -> dict[str, datetime]:
+    """Load drone flight acquisition datetimes from a CSV manifest.
+
+    The manifest is expected to include ``Plot``, ``Day of data collection``,
+    and ``Mean Time of data collection (24 hr clock)`` columns. Flight
+    identifiers are normalized to uppercase underscore-separated tokens such as
+    ``AOP_GOLDHILL``. Rows with missing identifiers or malformed datetimes are
+    skipped with warnings so a partially messy field manifest can still support
+    valid flights.
+    """
+
+    manifest_path = Path(manifest_path)
+    frame = pd.read_csv(manifest_path)
+    plot_col = _find_manifest_column(frame.columns, _DRONE_MANIFEST_ID_COLUMN)
+    date_col = _find_manifest_column(frame.columns, _DRONE_MANIFEST_DATE_COLUMN)
+    time_col = _find_manifest_column(frame.columns, _DRONE_MANIFEST_TIME_COLUMN)
+    missing = [
+        label
+        for label, column in (
+            (_DRONE_MANIFEST_ID_COLUMN, plot_col),
+            (_DRONE_MANIFEST_DATE_COLUMN, date_col),
+            (_DRONE_MANIFEST_TIME_COLUMN, time_col),
+        )
+        if column is None
+    ]
+    if missing:
+        raise ValueError(
+            "Drone manifest is missing required column(s): "
+            + ", ".join(missing)
+            + f" in {manifest_path}"
+        )
+
+    manifest: dict[str, datetime] = {}
+    for row_number, row in frame.iterrows():
+        flight_id = _normalise_drone_manifest_id(row.get(plot_col))
+        if not flight_id:
+            LOGGER.warning(
+                "[drone] Skipping manifest row %s with missing Plot value in %s",
+                row_number + 2,
+                manifest_path,
+            )
+            continue
+
+        date_value = str(row.get(date_col, "")).strip()
+        time_value = str(row.get(time_col, "")).strip()
+        parsed = pd.to_datetime(
+            f"{date_value} {time_value}",
+            errors="coerce",
+        )
+        if pd.isna(parsed):
+            LOGGER.warning(
+                "[drone] Skipping manifest row %s for %s with malformed "
+                "acquisition datetime: %r %r",
+                row_number + 2,
+                flight_id,
+                date_value,
+                time_value,
+            )
+            continue
+
+        acquisition_datetime = parsed.to_pydatetime()
+        if flight_id in manifest:
+            LOGGER.warning(
+                "[drone] Duplicate manifest flight id %s in %s; keeping the first datetime %s",
+                flight_id,
+                manifest_path,
+                manifest[flight_id].isoformat(),
+            )
+            continue
+        manifest[flight_id] = acquisition_datetime
+
+    return manifest
+
+
+def _resolve_drone_manifest_path(
+    manifest_path: str | Path | None,
+    *,
+    input_path: str | Path,
+) -> Path:
+    """Resolve a drone manifest path with notebook-friendly relative fallbacks."""
+
+    bundled_manifest = get_package_data_path(_DRONE_DEFAULT_MANIFEST_FILENAME)
+    if manifest_path is None:
+        return bundled_manifest
+
+    requested = Path(manifest_path)
+    input_path = Path(input_path)
+    if requested.is_absolute():
+        candidates = [requested]
+    else:
+        cwd = Path.cwd()
+        input_candidates = (
+            [input_path, cwd / input_path]
+            if not input_path.is_absolute()
+            else [input_path]
+        )
+        input_bases: list[Path] = []
+        for candidate in input_candidates:
+            input_bases.append(candidate)
+            input_bases.append(candidate.parent)
+        candidates = [cwd / requested, requested]
+        for base in input_bases:
+            candidates.append(base / requested)
+        if requested.name in _DRONE_DEFAULT_MANIFEST_ALIASES:
+            candidates.append(bundled_manifest)
+
+    checked: list[Path] = []
+    for candidate in candidates:
+        candidate = candidate.expanduser()
+        if candidate in checked:
+            continue
+        checked.append(candidate)
+        if candidate.exists():
+            return candidate.resolve()
+
+    checked_text = "\n".join(f"  - {path}" for path in checked)
+    raise FileNotFoundError(
+        "Drone manifest CSV not found. Pass an absolute path or place/upload "
+        "the manifest into the notebook working directory or drone input "
+        f"folder.\nRequested: {manifest_path}\nChecked:\n{checked_text}"
+    )
+
+
+def lookup_flight_datetime(
+    flight_id: str,
+    manifest: dict[str, datetime] | None,
+) -> datetime | None:
+    """Return a manifest datetime for a derived drone flight identifier.
+
+    Matching rules are deliberately conservative and deterministic:
+
+    - identifiers are compared after uppercasing and collapsing separators to
+      underscores;
+    - an exact match wins first;
+    - a trailing ``YYYYMMDD`` token is ignored, so ``AOP_GOLDHILL_20230814``
+      matches manifest row ``AOP_GOLDHILL``;
+    - if needed, separators are ignored for compact matching, so ``SPR1``
+      matches manifest row ``SPR-1``;
+    - if neither rule matches, the longest manifest key that prefixes the
+      derived flight stem wins.
+    """
+
+    if not manifest:
+        return None
+
+    normalized = _normalise_drone_manifest_id(flight_id)
+    if normalized in manifest:
+        return manifest[normalized]
+
+    without_date = _strip_trailing_manifest_date(normalized)
+    if without_date in manifest:
+        return manifest[without_date]
+
+    compact_without_date = _compact_drone_manifest_id(without_date)
+    for candidate, acquisition_datetime in sorted(
+        manifest.items(),
+        key=lambda item: len(item[0]),
+        reverse=True,
+    ):
+        if compact_without_date == _compact_drone_manifest_id(candidate):
+            return acquisition_datetime
+
+    for candidate in sorted(manifest, key=len, reverse=True):
+        if normalized.startswith(f"{candidate}_"):
+            return manifest[candidate]
+    return None
 
 
 def clean_name(name: str) -> str:
@@ -156,6 +416,630 @@ def build_drone_output_paths(
         "qa_png": flight_dir / f"{flight_stem}__qa.png",
         "qa_json": flight_dir / f"{flight_stem}__qa.json",
     }
+
+
+def _drone_path_matches_keywords(path: Path, keyword_groups: Sequence[Sequence[str]]) -> bool:
+    stem_lower = path.stem.lower()
+    return any(all(token in stem_lower for token in group) for group in keyword_groups)
+
+
+def _is_drone_ancillary_tiff(path: str | Path) -> bool:
+    candidate = Path(path)
+    return any(
+        _drone_path_matches_keywords(candidate, keyword_groups)
+        for keyword_groups in _DRONE_TIFF_ANCILLARY_KEYWORDS.values()
+    )
+
+
+def _discover_drone_input_sources(input_path: str | Path) -> list[DroneInputSource]:
+    root = Path(input_path)
+    if root.is_file():
+        candidates = [root]
+    elif root.exists():
+        tif_candidates = sorted(root.rglob("*.tif")) + sorted(root.rglob("*.tiff"))
+        candidates = sorted(root.rglob("*.h5")) + tif_candidates
+    else:
+        return []
+
+    sources_by_stem: dict[str, DroneInputSource] = {}
+    for candidate in candidates:
+        suffix = candidate.suffix.lower()
+        if suffix == ".h5":
+            source_type = "h5"
+        elif suffix in {".tif", ".tiff"}:
+            if _is_drone_ancillary_tiff(candidate):
+                continue
+            source_type = "tiff"
+        else:
+            continue
+
+        flight_stem = derive_drone_flight_stem(candidate)
+        existing = sources_by_stem.get(flight_stem)
+        if existing is not None:
+            if existing.source_type == "h5":
+                continue
+            if source_type == "h5":
+                sources_by_stem[flight_stem] = DroneInputSource(
+                    source_path=candidate,
+                    source_type=source_type,
+                    flight_stem=flight_stem,
+                )
+                continue
+            raise ValueError(
+                "Duplicate drone flight stem derived within one run: "
+                f"{flight_stem} from {existing.source_path} and {candidate}. "
+                "Package-folder naming must remain unique per flight."
+            )
+
+        sources_by_stem[flight_stem] = DroneInputSource(
+            source_path=candidate,
+            source_type=source_type,
+            flight_stem=flight_stem,
+        )
+
+    return sorted(
+        sources_by_stem.values(),
+        key=lambda item: (str(_drone_package_dir(item.source_path)), item.source_path.name),
+    )
+
+
+def _find_drone_tiff_ancillary(package_dir: Path, key: str) -> Path | None:
+    keyword_groups = _DRONE_TIFF_ANCILLARY_KEYWORDS[key]
+    for candidate in sorted(package_dir.glob("*.tif")) + sorted(package_dir.glob("*.tiff")):
+        if _drone_path_matches_keywords(candidate, keyword_groups):
+            return candidate
+    return None
+
+
+def _normalise_tiff_spectral_vector(
+    values: Sequence[float] | np.ndarray | None,
+    *,
+    field_name: str,
+    band_count: int,
+    default_values: Sequence[float],
+) -> np.ndarray:
+    if values is None:
+        if band_count != len(default_values):
+            raise ValueError(
+                f"TIFF source has {band_count} bands but no explicit {field_name} were provided. "
+                f"Default {field_name} are only available for {len(default_values)}-band sources."
+            )
+        values = default_values
+
+    array = np.asarray(values, dtype=np.float32).reshape(-1)
+    if array.size != band_count:
+        raise ValueError(
+            f"TIFF {field_name} length {array.size} does not match reflectance band count {band_count}."
+        )
+    return array
+
+
+def _read_drone_tiff_raster(path: str | Path) -> tuple[np.ndarray, str, Any, float | None]:
+    try:
+        import rasterio
+    except Exception as exc:  # pragma: no cover - optional dependency guard
+        raise RuntimeError(
+            "rasterio is required for TIFF-backed drone inputs."
+        ) from exc
+
+    with rasterio.open(path) as src:
+        data = src.read()
+        crs_wkt = src.crs.to_wkt() if src.crs is not None else ""
+        transform = src.transform
+        nodata = src.nodata
+    return np.asarray(data, dtype=np.float32), crs_wkt, transform, nodata
+
+
+def _validate_drone_tiff_ancillary_alignment(
+    reflectance_path: Path,
+    reflectance_shape: tuple[int, int],
+    reflectance_transform: Any,
+    reflectance_crs_wkt: str,
+    ancillary_path: Path,
+) -> np.ndarray:
+    try:
+        import rasterio
+    except Exception as exc:  # pragma: no cover - optional dependency guard
+        raise RuntimeError(
+            "rasterio is required for TIFF-backed drone inputs."
+        ) from exc
+
+    with rasterio.open(ancillary_path) as src:
+        array = src.read(1)
+        if array.shape != reflectance_shape:
+            raise ValueError(
+                f"Ancillary TIFF {ancillary_path} has shape {array.shape} which does not match "
+                f"reflectance TIFF {reflectance_path} shape {reflectance_shape}."
+            )
+        if src.transform != reflectance_transform:
+            raise ValueError(
+                f"Ancillary TIFF {ancillary_path} transform does not match reflectance TIFF {reflectance_path}."
+            )
+        ancillary_crs_wkt = src.crs.to_wkt() if src.crs is not None else ""
+        if ancillary_crs_wkt != reflectance_crs_wkt:
+            raise ValueError(
+                f"Ancillary TIFF {ancillary_path} CRS does not match reflectance TIFF {reflectance_path}."
+            )
+        return np.asarray(array, dtype=np.float32)
+
+
+def _build_drone_tiff_map_info(transform: Any, crs_wkt: str) -> str:
+    xres = abs(float(transform.a))
+    yres = abs(float(transform.e))
+    ulx = float(transform.c)
+    uly = float(transform.f)
+    zone = 0
+    hemisphere = "North"
+
+    epsg_match = re.search(r"EPSG\",\"(\d+)\"", crs_wkt) or re.search(r"ID\[\"EPSG\",(\d+)\]", crs_wkt)
+    if epsg_match:
+        epsg = int(epsg_match.group(1))
+        if 32601 <= epsg <= 32660:
+            zone = epsg - 32600
+            hemisphere = "North"
+        elif 32701 <= epsg <= 32760:
+            zone = epsg - 32700
+            hemisphere = "South"
+
+    if zone > 0:
+        return (
+            f"UTM, 1.000, 1.000, {ulx:.3f}, {uly:.3f}, {xres:.3f}, {yres:.3f}, "
+            f"{zone}, {hemisphere}, WGS-84, units=Meters"
+        )
+
+    return f"Arbitrary, 1.000, 1.000, {ulx:.3f}, {uly:.3f}, {xres:.3f}, {yres:.3f}"
+
+
+def _coerce_acquisition_datetime(value: datetime | str | None) -> datetime | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value
+    parsed = pd.to_datetime(str(value), errors="coerce")
+    if pd.isna(parsed):
+        raise ValueError(f"Could not parse acquisition datetime: {value!r}")
+    return parsed.to_pydatetime()
+
+
+def _datetime_to_utc_naive(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value
+    return value.astimezone(timezone.utc).replace(tzinfo=None)
+
+
+def _drone_pixel_lon_lat(
+    *,
+    transform: Any,
+    crs_wkt: str,
+    shape: tuple[int, int],
+) -> tuple[np.ndarray, np.ndarray]:
+    """Return per-pixel longitude/latitude arrays from a raster transform/CRS."""
+
+    try:
+        import rasterio.transform
+        from rasterio.crs import CRS
+        from rasterio.warp import transform as warp_transform
+    except Exception as exc:  # pragma: no cover - rasterio is a runtime dependency
+        raise RuntimeError(
+            "rasterio is required to compute manifest-derived drone solar geometry."
+        ) from exc
+
+    rows, cols = np.indices(shape, dtype=np.float64)
+    xs, ys = rasterio.transform.xy(transform, rows, cols, offset="center")
+    x_flat = np.asarray(xs, dtype=np.float64).ravel()
+    y_flat = np.asarray(ys, dtype=np.float64).ravel()
+
+    if not crs_wkt:
+        raise ValueError(
+            "Cannot compute manifest-derived solar geometry because the "
+            "reflectance TIFF has no CRS."
+        )
+    source_crs = CRS.from_wkt(crs_wkt)
+    lon_flat, lat_flat = warp_transform(source_crs, "EPSG:4326", x_flat, y_flat)
+    lon = np.asarray(lon_flat, dtype=np.float64).reshape(shape)
+    lat = np.asarray(lat_flat, dtype=np.float64).reshape(shape)
+    return lon, lat
+
+
+def _compute_solar_geometry_arrays(
+    *,
+    acquisition_datetime: datetime,
+    longitude: np.ndarray,
+    latitude: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Compute approximate solar zenith/azimuth rasters for a UTC acquisition time."""
+
+    dt_utc = _datetime_to_utc_naive(acquisition_datetime)
+    day_of_year = dt_utc.timetuple().tm_yday
+    fractional_hour = (
+        dt_utc.hour
+        + dt_utc.minute / 60.0
+        + dt_utc.second / 3600.0
+        + dt_utc.microsecond / 3_600_000_000.0
+    )
+    gamma = 2.0 * np.pi / 365.0 * (day_of_year - 1.0 + (fractional_hour - 12.0) / 24.0)
+    declination = (
+        0.006918
+        - 0.399912 * np.cos(gamma)
+        + 0.070257 * np.sin(gamma)
+        - 0.006758 * np.cos(2.0 * gamma)
+        + 0.000907 * np.sin(2.0 * gamma)
+        - 0.002697 * np.cos(3.0 * gamma)
+        + 0.00148 * np.sin(3.0 * gamma)
+    )
+    equation_of_time = 229.18 * (
+        0.000075
+        + 0.001868 * np.cos(gamma)
+        - 0.032077 * np.sin(gamma)
+        - 0.014615 * np.cos(2.0 * gamma)
+        - 0.040849 * np.sin(2.0 * gamma)
+    )
+    minutes_utc = fractional_hour * 60.0
+    true_solar_time = (minutes_utc + equation_of_time + 4.0 * longitude) % 1440.0
+    hour_angle = np.deg2rad(true_solar_time / 4.0 - 180.0)
+    lat_rad = np.deg2rad(latitude)
+
+    cos_zenith = (
+        np.sin(lat_rad) * np.sin(declination)
+        + np.cos(lat_rad) * np.cos(declination) * np.cos(hour_angle)
+    )
+    zenith = np.rad2deg(np.arccos(np.clip(cos_zenith, -1.0, 1.0)))
+    azimuth = (
+        np.rad2deg(
+            np.arctan2(
+                np.sin(hour_angle),
+                np.cos(hour_angle) * np.sin(lat_rad)
+                - np.tan(declination) * np.cos(lat_rad),
+            )
+        )
+        + 180.0
+    ) % 360.0
+    return zenith.astype(np.float32), azimuth.astype(np.float32)
+
+
+def _solar_geometry_stats(
+    solar_zenith: np.ndarray | float,
+    solar_azimuth: np.ndarray | float,
+) -> dict[str, float]:
+    zenith = np.asarray(solar_zenith, dtype=np.float32)
+    azimuth = np.asarray(solar_azimuth, dtype=np.float32)
+    return {
+        "solar_zenith_mean": float(np.nanmean(zenith)),
+        "solar_zenith_min": float(np.nanmin(zenith)),
+        "solar_zenith_max": float(np.nanmax(zenith)),
+        "solar_azimuth_mean": float(np.nanmean(azimuth)),
+        "solar_azimuth_min": float(np.nanmin(azimuth)),
+        "solar_azimuth_max": float(np.nanmax(azimuth)),
+    }
+
+
+def _write_solar_geometry_attrs(
+    metadata_group: h5py.Group,
+    *,
+    source: str,
+    acquisition_datetime: datetime | None,
+    solar_zenith: np.ndarray | float,
+    solar_azimuth: np.ndarray | float,
+) -> None:
+    stats = _solar_geometry_stats(solar_zenith, solar_azimuth)
+    metadata_group.attrs["solar_geometry_source"] = source
+    metadata_group.attrs["acquisition_datetime_used"] = (
+        _datetime_to_utc_naive(acquisition_datetime).isoformat()
+        if acquisition_datetime is not None
+        else ""
+    )
+    for key, value in stats.items():
+        metadata_group.attrs[key] = value
+
+
+def summarize_drone_h5_solar_geometry(h5_path: str | Path) -> dict[str, Any]:
+    """Return solar geometry provenance and summary stats for a drone working H5."""
+
+    h5_path = Path(h5_path)
+    summary: dict[str, Any] = {
+        "solar_geometry_source": "missing",
+        "acquisition_datetime_used": None,
+        "solar_zenith_mean": None,
+        "solar_zenith_min": None,
+        "solar_zenith_max": None,
+        "solar_azimuth_mean": None,
+        "solar_azimuth_min": None,
+        "solar_azimuth_max": None,
+    }
+
+    try:
+        h5_file_context = h5py.File(h5_path, "r")
+    except OSError as exc:
+        LOGGER.warning(
+            "[drone] Could not read solar geometry summary from %s: %s",
+            h5_path,
+            exc,
+        )
+        return summary
+
+    with h5_file_context as h5_file:
+        metadata_group = None
+        for candidate in h5_file.values():
+            if isinstance(candidate, h5py.Group) and "Reflectance/Metadata" in candidate:
+                metadata_group = candidate["Reflectance/Metadata"]
+                break
+        if metadata_group is None:
+            metadata_group = h5_file.get("Reflectance/Metadata")
+        if not isinstance(metadata_group, h5py.Group):
+            return summary
+
+        source = metadata_group.attrs.get("solar_geometry_source")
+        if isinstance(source, bytes):
+            source = source.decode("utf-8")
+        acquisition = metadata_group.attrs.get("acquisition_datetime_used")
+        if isinstance(acquisition, bytes):
+            acquisition = acquisition.decode("utf-8")
+        summary["solar_geometry_source"] = str(source or "missing")
+        summary["acquisition_datetime_used"] = str(acquisition or "") or None
+
+        if "Solar_Zenith_Angle" in metadata_group and "Solar_Azimuth_Angle" in metadata_group:
+            stats = _solar_geometry_stats(
+                metadata_group["Solar_Zenith_Angle"][()],
+                metadata_group["Solar_Azimuth_Angle"][()],
+            )
+            summary.update(stats)
+            if summary["solar_geometry_source"] == "missing":
+                summary["solar_geometry_source"] = "raster"
+        else:
+            for key in _DRONE_SOLAR_GEOMETRY_ATTRS[2:]:
+                if key in metadata_group.attrs:
+                    summary[key] = float(metadata_group.attrs[key])
+
+    return summary
+
+
+def convert_drone_tiff_to_h5(
+    reflectance_tiff_path: str | Path,
+    *,
+    output_h5_path: str | Path,
+    wavelengths_nm: Sequence[float] | np.ndarray | None = None,
+    fwhm_nm: Sequence[float] | np.ndarray | None = None,
+    sensor_zenith_tiff: str | Path | None = None,
+    sensor_azimuth_tiff: str | Path | None = None,
+    slope_tiff: str | Path | None = None,
+    aspect_tiff: str | Path | None = None,
+    solar_zenith_tiff: str | Path | None = None,
+    solar_azimuth_tiff: str | Path | None = None,
+    solar_zenith_deg: float | None = None,
+    solar_azimuth_deg: float | None = None,
+    sensor_zenith_deg: float | None = None,
+    sensor_azimuth_deg: float | None = None,
+    acquisition_datetime: datetime | str | None = None,
+    require_solar_geometry: bool = False,
+    overwrite: bool = False,
+) -> Path:
+    reflectance_tiff_path = Path(reflectance_tiff_path)
+    output_h5_path = Path(output_h5_path)
+    if output_h5_path.exists() and not overwrite:
+        return output_h5_path
+
+    reflectance_raw, crs_wkt, transform, nodata = _read_drone_tiff_raster(reflectance_tiff_path)
+    if reflectance_raw.ndim != 3:
+        raise ValueError(
+            f"Reflectance TIFF must be a multiband raster; received shape {reflectance_raw.shape}."
+        )
+
+    reflectance_cube = np.moveaxis(reflectance_raw, 0, 2).astype(np.float32, copy=False)
+    lines, columns, band_count = reflectance_cube.shape
+    nodata_value = np.float32(_DRONE_FALLBACK_NODATA if nodata is None else nodata)
+    wavelengths_arr = _normalise_tiff_spectral_vector(
+        wavelengths_nm,
+        field_name="wavelengths_nm",
+        band_count=band_count,
+        default_values=_DRONE_TIFF_DEFAULT_WAVELENGTHS_NM,
+    )
+    fwhm_arr = _normalise_tiff_spectral_vector(
+        fwhm_nm,
+        field_name="fwhm_nm",
+        band_count=band_count,
+        default_values=_DRONE_TIFF_DEFAULT_FWHM_NM,
+    )
+
+    reflectance_shape = (lines, columns)
+    ancillary_arrays: dict[str, np.ndarray | float] = {}
+    optional_tiffs = {
+        "slope": slope_tiff,
+        "aspect": aspect_tiff,
+        "sensor_zenith": sensor_zenith_tiff,
+        "sensor_azimuth": sensor_azimuth_tiff,
+    }
+    scalar_fallbacks = {
+        "sensor_zenith": sensor_zenith_deg,
+        "sensor_azimuth": sensor_azimuth_deg,
+    }
+
+    for key, ancillary in optional_tiffs.items():
+        if ancillary is not None:
+            ancillary_arrays[key] = _validate_drone_tiff_ancillary_alignment(
+                reflectance_tiff_path,
+                reflectance_shape,
+                transform,
+                crs_wkt,
+                Path(ancillary),
+            )
+        elif scalar_fallbacks.get(key) is not None:
+            ancillary_arrays[key] = float(scalar_fallbacks[key])
+
+    acquisition_dt = _coerce_acquisition_datetime(acquisition_datetime)
+    solar_geometry_source = "missing"
+    if solar_zenith_tiff is not None and solar_azimuth_tiff is not None:
+        ancillary_arrays["solar_zenith"] = _validate_drone_tiff_ancillary_alignment(
+            reflectance_tiff_path,
+            reflectance_shape,
+            transform,
+            crs_wkt,
+            Path(solar_zenith_tiff),
+        )
+        ancillary_arrays["solar_azimuth"] = _validate_drone_tiff_ancillary_alignment(
+            reflectance_tiff_path,
+            reflectance_shape,
+            transform,
+            crs_wkt,
+            Path(solar_azimuth_tiff),
+        )
+        solar_geometry_source = "raster"
+    elif solar_zenith_deg is not None and solar_azimuth_deg is not None:
+        ancillary_arrays["solar_zenith"] = float(solar_zenith_deg)
+        ancillary_arrays["solar_azimuth"] = float(solar_azimuth_deg)
+        solar_geometry_source = "scalar"
+    elif acquisition_dt is not None:
+        longitude, latitude = _drone_pixel_lon_lat(
+            transform=transform,
+            crs_wkt=crs_wkt,
+            shape=reflectance_shape,
+        )
+        solar_zenith, solar_azimuth = _compute_solar_geometry_arrays(
+            acquisition_datetime=acquisition_dt,
+            longitude=longitude,
+            latitude=latitude,
+        )
+        ancillary_arrays["solar_zenith"] = solar_zenith
+        ancillary_arrays["solar_azimuth"] = solar_azimuth
+        solar_geometry_source = "manifest_computed"
+    else:
+        if solar_zenith_tiff is not None or solar_azimuth_tiff is not None:
+            LOGGER.warning(
+                "[drone] Incomplete solar geometry TIFF pair for %s; both "
+                "zenith and azimuth are required.",
+                reflectance_tiff_path,
+            )
+        if solar_zenith_deg is not None or solar_azimuth_deg is not None:
+            LOGGER.warning(
+                "[drone] Incomplete scalar solar geometry for %s; both zenith "
+                "and azimuth are required.",
+                reflectance_tiff_path,
+            )
+        if require_solar_geometry:
+            raise RuntimeError(
+                "Drone TIFF conversion requires solar geometry for requested correction, "
+                "but no complete solar geometry TIFF pair, scalar solar angles, or "
+                "manifest acquisition datetime was available."
+            )
+
+    output_h5_path.parent.mkdir(parents=True, exist_ok=True)
+    site_group_name = clean_name(_drone_package_dir(reflectance_tiff_path).name) or "DRONE"
+    map_info = _build_drone_tiff_map_info(transform, crs_wkt)
+
+    with h5py.File(output_h5_path, "w") as h5_file:
+        site_group = h5_file.create_group(site_group_name)
+        reflectance_group = site_group.create_group("Reflectance")
+        metadata_group = reflectance_group.create_group("Metadata")
+        coordinate_group = metadata_group.create_group("Coordinate_System")
+        spectral_group = metadata_group.create_group("Spectral_Data")
+        ancillary_group = metadata_group.create_group("Ancillary_Imagery")
+
+        reflectance_ds = reflectance_group.create_dataset(
+            "Reflectance_Data",
+            data=reflectance_cube,
+            dtype=np.float32,
+        )
+        reflectance_ds.attrs["Data_Ignore_Value"] = nodata_value
+        reflectance_ds.attrs["_FillValue"] = nodata_value
+        reflectance_ds.attrs["NoData"] = nodata_value
+        reflectance_ds.attrs["no_data"] = nodata_value
+        reflectance_ds.attrs["Scale_Factor"] = np.float32(1.0)
+
+        wavelength_ds = spectral_group.create_dataset(
+            "Wavelength",
+            data=wavelengths_arr,
+            dtype=np.float32,
+        )
+        wavelength_ds.attrs["Units"] = "nanometers"
+        fwhm_ds = spectral_group.create_dataset(
+            "FWHM",
+            data=fwhm_arr,
+            dtype=np.float32,
+        )
+        fwhm_ds.attrs["Units"] = "nanometers"
+
+        str_dtype = h5py.string_dtype(encoding="utf-8")
+        coordinate_group.create_dataset(
+            "Coordinate_System_String",
+            data=crs_wkt,
+            dtype=str_dtype,
+        )
+        coordinate_group.create_dataset("Map_Info", data=map_info, dtype=str_dtype)
+
+        ancillary_group.create_dataset(
+            "Path_Length",
+            data=np.ones(reflectance_shape, dtype=np.float32),
+            dtype=np.float32,
+        )
+        if "slope" in ancillary_arrays:
+            ancillary_group.create_dataset("Slope", data=ancillary_arrays["slope"], dtype=np.float32)
+        if "aspect" in ancillary_arrays:
+            ancillary_group.create_dataset("Aspect", data=ancillary_arrays["aspect"], dtype=np.float32)
+        if "sensor_zenith" in ancillary_arrays:
+            metadata_group.create_dataset("to-sensor_Zenith_Angle", data=ancillary_arrays["sensor_zenith"])
+        if "sensor_azimuth" in ancillary_arrays:
+            metadata_group.create_dataset("to-sensor_Azimuth_Angle", data=ancillary_arrays["sensor_azimuth"])
+        if "solar_zenith" in ancillary_arrays:
+            metadata_group.create_dataset("Solar_Zenith_Angle", data=ancillary_arrays["solar_zenith"])
+        if "solar_azimuth" in ancillary_arrays:
+            metadata_group.create_dataset("Solar_Azimuth_Angle", data=ancillary_arrays["solar_azimuth"])
+        if "solar_zenith" in ancillary_arrays and "solar_azimuth" in ancillary_arrays:
+            _write_solar_geometry_attrs(
+                metadata_group,
+                source=solar_geometry_source,
+                acquisition_datetime=acquisition_dt,
+                solar_zenith=ancillary_arrays["solar_zenith"],
+                solar_azimuth=ancillary_arrays["solar_azimuth"],
+            )
+
+    return output_h5_path
+
+
+def _prepare_drone_source_working_h5(
+    source_path: str | Path,
+    *,
+    source_type: str,
+    working_path: str | Path,
+    overwrite: bool = False,
+    tiff_wavelengths_nm: Sequence[float] | np.ndarray | None = None,
+    tiff_fwhm_nm: Sequence[float] | np.ndarray | None = None,
+    tiff_solar_zenith_deg: float | None = None,
+    tiff_solar_azimuth_deg: float | None = None,
+    tiff_sensor_zenith_deg: float | None = None,
+    tiff_sensor_azimuth_deg: float | None = None,
+    acquisition_datetime: datetime | str | None = None,
+    require_solar_geometry: bool = False,
+) -> tuple[Path, bool]:
+    source_path = Path(source_path)
+    if source_type == "h5":
+        return _prepare_drone_h5_working_copy(
+            source_path,
+            working_path=working_path,
+            overwrite=overwrite,
+        )
+    if source_type != "tiff":
+        raise ValueError(f"Unsupported drone source_type: {source_type}")
+
+    package_dir = _drone_package_dir(source_path)
+    prepared_path = convert_drone_tiff_to_h5(
+        source_path,
+        output_h5_path=working_path,
+        wavelengths_nm=tiff_wavelengths_nm,
+        fwhm_nm=tiff_fwhm_nm,
+        slope_tiff=_find_drone_tiff_ancillary(package_dir, "slope"),
+        aspect_tiff=_find_drone_tiff_ancillary(package_dir, "aspect"),
+        sensor_zenith_tiff=_find_drone_tiff_ancillary(package_dir, "sensor_zenith"),
+        sensor_azimuth_tiff=_find_drone_tiff_ancillary(package_dir, "sensor_azimuth"),
+        solar_zenith_tiff=_find_drone_tiff_ancillary(package_dir, "solar_zenith"),
+        solar_azimuth_tiff=_find_drone_tiff_ancillary(package_dir, "solar_azimuth"),
+        solar_zenith_deg=tiff_solar_zenith_deg,
+        solar_azimuth_deg=tiff_solar_azimuth_deg,
+        sensor_zenith_deg=tiff_sensor_zenith_deg,
+        sensor_azimuth_deg=tiff_sensor_azimuth_deg,
+        acquisition_datetime=acquisition_datetime,
+        require_solar_geometry=require_solar_geometry,
+        overwrite=overwrite,
+    )
+    return prepared_path, False
 
 
 def _find_drone_reflectance_dataset(h5_file: h5py.File) -> h5py.Dataset:
@@ -1167,14 +2051,27 @@ def run_drone_pipeline(
     use_ndvi_brdf_bins: bool = False,
     apply_brightness_adjustment: bool = False,
     overwrite: bool = False,
+    tiff_wavelengths_nm: Sequence[float] | np.ndarray | None = None,
+    tiff_fwhm_nm: Sequence[float] | np.ndarray | None = None,
+    tiff_solar_zenith_deg: float | None = None,
+    tiff_solar_azimuth_deg: float | None = None,
+    tiff_sensor_zenith_deg: float | None = None,
+    tiff_sensor_azimuth_deg: float | None = None,
+    drone_manifest_path: str | Path | None = None,
+    require_solar_geometry: bool = True,
 ) -> dict[str, Any]:
-    """Run the local-H5 drone pipeline with wavelength-driven band resolution and QA audit output."""
+    """Run the drone pipeline from local HDF5 or reflectance TIFF sources."""
 
     run_started = time.monotonic()
     input_h5_dir = Path(input_h5_dir)
     output_dir = Path(output_dir)
     polygon_path = Path(polygon_path) if polygon_path is not None else None
     output_dir.mkdir(parents=True, exist_ok=True)
+    drone_manifest_path = _resolve_drone_manifest_path(
+        drone_manifest_path,
+        input_path=input_h5_dir,
+    )
+    drone_manifest = load_drone_manifest(drone_manifest_path)
 
     results: dict[str, Any] = {
         "platform": "drone",
@@ -1191,39 +2088,60 @@ def run_drone_pipeline(
             "brightness_adjustment_applied": False,
             "cloud_mask_applied": False,
             "ndvi_brdf_bins_enabled": bool(use_ndvi_brdf_bins),
+            "drone_manifest_path": (
+                str(drone_manifest_path) if drone_manifest_path is not None else None
+            ),
+            "require_solar_geometry": bool(require_solar_geometry),
             "files": [],
         },
     }
 
-    h5_files = sorted(input_h5_dir.rglob("*.h5"))
-    results["qa_summary"]["discovered_total"] = len(h5_files)
-    results["qa_summary"]["attempted_total"] = len(h5_files)
+    input_sources = _discover_drone_input_sources(input_h5_dir)
+    input_path_exists = input_h5_dir.exists()
+    input_path_type = (
+        "file"
+        if input_h5_dir.is_file()
+        else "directory"
+        if input_h5_dir.is_dir()
+        else "missing"
+    )
+    results["qa_summary"]["discovered_total"] = len(input_sources)
+    results["qa_summary"]["attempted_total"] = len(input_sources)
     results["qa_summary"]["run_root"] = str(output_dir)
     results["qa_summary"]["polygon_path"] = (
         str(polygon_path) if polygon_path is not None else None
     )
-    if not h5_files:
+    results["qa_summary"]["input_source_path"] = str(input_h5_dir)
+    results["qa_summary"]["input_source_path_resolved"] = str(
+        input_h5_dir.expanduser().resolve(strict=False)
+    )
+    results["qa_summary"]["input_source_path_exists"] = bool(input_path_exists)
+    results["qa_summary"]["input_source_path_type"] = input_path_type
+    results["qa_summary"]["supported_input_extensions"] = list(
+        _DRONE_SUPPORTED_INPUT_EXTENSIONS
+    )
+    if not input_sources:
+        results["qa_summary"]["input_discovery_status"] = (
+            "no_supported_drone_inputs_found"
+        )
+        results["qa_summary"]["skip_reason"] = (
+            "No supported drone inputs were found under input_h5_dir. "
+            "Expected local .h5, .tif, or .tiff files; ancillary-only TIFFs such "
+            "as slope/aspect/sensor geometry are not treated as flight inputs."
+        )
+        _drone_emit(
+            "[drone] No supported drone inputs discovered under "
+            f"{input_h5_dir!s} (exists={input_path_exists}, "
+            f"type={input_path_type}). Expected extensions: "
+            f"{', '.join(_DRONE_SUPPORTED_INPUT_EXTENSIONS)}."
+        )
         qa_path = _write_json(
             output_dir / "drone_qa_summary.json", results["qa_summary"]
         )
         results["qa_summary_path"] = str(qa_path)
         return results
 
-    flight_stems: dict[Path, str] = {}
-    stem_sources: dict[str, Path] = {}
-    for h5_path in h5_files:
-        flight_stem = derive_drone_flight_stem(h5_path)
-        existing_source = stem_sources.get(flight_stem)
-        if existing_source is not None and existing_source != h5_path:
-            raise ValueError(
-                "Duplicate drone flight stem derived within one run: "
-                f"{flight_stem} from {existing_source} and {h5_path}. "
-                "Package-folder naming must remain unique per flight."
-            )
-        flight_stems[h5_path] = flight_stem
-        stem_sources[flight_stem] = h5_path
-
-    total_flights = len(h5_files)
+    total_flights = len(input_sources)
     _drone_emit(
         "[drone] Starting batch: "
         f"{total_flights} discovered | {total_flights} to process | "
@@ -1250,8 +2168,9 @@ def run_drone_pipeline(
         _DRONE_STATUS_FAILED_OTHER: 0,
     }
 
-    for index, h5_path in enumerate(h5_files, start=1):
-        flight_stem = flight_stems[h5_path]
+    for index, source in enumerate(input_sources, start=1):
+        source_path = source.source_path
+        flight_stem = source.flight_stem
         path_map = build_drone_output_paths(output_dir, flight_stem=flight_stem)
         prepared_h5_path = path_map["working_h5"]
         envi_stem = path_map["envi_stem"]
@@ -1259,12 +2178,25 @@ def run_drone_pipeline(
         polygon_output_path = path_map["polygon_parquet"]
         polygon_index_path = path_map["polygon_index"]
         overlay_debug_path = path_map["overlay_debug_png"]
-        package_dir = _drone_package_dir(h5_path)
+        package_dir = _drone_package_dir(source_path)
+        acquisition_datetime = (
+            lookup_flight_datetime(flight_stem, drone_manifest)
+            if source.source_type == "tiff"
+            else None
+        )
+        acquisition_datetime_used = (
+            _datetime_to_utc_naive(acquisition_datetime).isoformat()
+            if acquisition_datetime is not None
+            else None
+        )
         flight_started = time.monotonic()
         if batch_bar is not None:
-            batch_bar.set_postfix_str(f"{index}/{total_flights} {flight_stem} | preparing H5")
+            batch_bar.set_postfix_str(
+                f"{index}/{total_flights} {flight_stem} | preparing {source.source_type}"
+            )
         _drone_emit(
-            f"[drone] [{index}/{total_flights}] {flight_stem} | source={package_dir} | stage=preparing H5"
+            f"[drone] [{index}/{total_flights}] {flight_stem} | source={package_dir} "
+            f"| type={source.source_type} | stage=preparing working H5"
         )
         file_audit: dict[str, Any] = {
             "platform": "drone",
@@ -1272,8 +2204,15 @@ def run_drone_pipeline(
             "flight_dir": str(path_map["flight_dir"]),
             "source_package": package_dir.name,
             "source_package_path": str(package_dir),
-            "input_h5_filename": h5_path.name,
-            "input_h5_path": str(h5_path),
+            "input_source_type": source.source_type,
+            "input_source_filename": source_path.name,
+            "input_source_path": str(source_path),
+            "drone_manifest_path": (
+                str(drone_manifest_path) if drone_manifest_path is not None else None
+            ),
+            "manifest_flight_datetime": acquisition_datetime_used,
+            "input_h5_filename": source_path.name if source.source_type == "h5" else None,
+            "input_h5_path": str(source_path) if source.source_type == "h5" else None,
             "base_name": flight_stem,
             "flags": {
                 "topo_requested": bool(apply_topo),
@@ -1322,14 +2261,37 @@ def run_drone_pipeline(
             "status": None,
         }
         try:
-            prepared_h5_path, nodata_patched = _prepare_drone_h5_working_copy(
-                h5_path,
+            prepared_h5_path, nodata_patched = _prepare_drone_source_working_h5(
+                source_path,
+                source_type=source.source_type,
                 working_path=prepared_h5_path,
                 overwrite=overwrite,
+                tiff_wavelengths_nm=tiff_wavelengths_nm,
+                tiff_fwhm_nm=tiff_fwhm_nm,
+                tiff_solar_zenith_deg=tiff_solar_zenith_deg,
+                tiff_solar_azimuth_deg=tiff_solar_azimuth_deg,
+                tiff_sensor_zenith_deg=tiff_sensor_zenith_deg,
+                tiff_sensor_azimuth_deg=tiff_sensor_azimuth_deg,
+                acquisition_datetime=acquisition_datetime,
+                require_solar_geometry=bool(require_solar_geometry)
+                and (bool(apply_topo) or bool(apply_brdf)),
             )
             file_audit["prepared_h5_filename"] = prepared_h5_path.name
             file_audit["prepared_h5_path"] = str(prepared_h5_path)
             file_audit["nodata_patch_applied"] = bool(nodata_patched)
+            solar_geometry_summary = summarize_drone_h5_solar_geometry(prepared_h5_path)
+            file_audit.update(solar_geometry_summary)
+            if (
+                bool(require_solar_geometry)
+                and (bool(apply_topo) or bool(apply_brdf))
+                and solar_geometry_summary.get("solar_geometry_source") == "missing"
+            ):
+                raise RuntimeError(
+                    "Drone correction requested but no solar geometry is available. "
+                    "Provide solar_zenith/solar_azimuth TIFFs, scalar solar angles, "
+                    "or a drone_manifest_path with acquisition datetime values; "
+                    "set require_solar_geometry=False to permit an uncorrected fallback."
+                )
 
             cube = NeonCube(h5_path=prepared_h5_path)
             meta = validate_drone_h5_metadata(prepared_h5_path)
@@ -1450,7 +2412,7 @@ def run_drone_pipeline(
                 except Exception as plot_exc:
                     LOGGER.warning(
                         "[drone] Overlay debug plot failed for %s: %s",
-                        h5_path,
+                        source_path,
                         plot_exc,
                     )
                     file_audit["overlay_debug_error"] = str(plot_exc)
@@ -1507,7 +2469,7 @@ def run_drone_pipeline(
                         file_audit["polygon_csv_error"] = None
                         LOGGER.warning(
                             "[drone] No polygon overlap for %s: raster_crs=%s polygon_crs=%s overlap_after_reproject=%s intersecting_polygons=%s reason=%s",
-                            h5_path,
+                            source_path,
                             spatial_diagnostics.get("raster_crs"),
                             spatial_diagnostics.get("polygon_crs"),
                             spatial_diagnostics.get("bounds_overlap_after_reproject"),
@@ -1525,7 +2487,7 @@ def run_drone_pipeline(
                 file_audit["polygon_extraction_skipped_reason"] = "no polygons provided"
                 file_audit["status"] = _DRONE_STATUS_SUCCESS_QA_ONLY_NO_POLYGONS
 
-            results["processed"].append(str(h5_path))
+            results["processed"].append(str(source_path))
             if file_audit["status"] is None:
                 file_audit["status"] = _DRONE_STATUS_SUCCESS_EXTRACTED
             elapsed = time.monotonic() - flight_started
@@ -1570,8 +2532,8 @@ def run_drone_pipeline(
             file_audit["error"] = reason
             file_audit["elapsed_seconds"] = round(elapsed, 3)
             status_counts[status] += 1
-            LOGGER.exception("[drone] FAILED for %s", h5_path)
-            results["failed"].append({"input": str(h5_path), "error": reason})
+            LOGGER.exception("[drone] FAILED for %s", source_path)
+            results["failed"].append({"input": str(source_path), "error": reason})
             eta = _format_eta(completed_flight_times, total_flights - index)
             eta_suffix = f" | eta={eta}" if eta else ""
             suffix = f": {reason}" if reason else ""
@@ -1716,10 +2678,14 @@ __all__ = [
     "build_drone_config",
     "clean_name",
     "collect_drone_spatial_diagnostics",
+    "convert_drone_tiff_to_h5",
     "derive_drone_flight_stem",
     "export_h5_to_envi",
+    "load_drone_manifest",
+    "lookup_flight_datetime",
     "resolve_band_map",
     "run_drone_pipeline",
     "save_drone_overlay_debug_plot",
+    "summarize_drone_h5_solar_geometry",
     "validate_drone_h5_metadata",
 ]

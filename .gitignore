@@ -1,4 +1,20 @@
 .Rproj.user
+
+# OS/editor and Python-generated files
+.DS_Store
+**/.DS_Store
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+docs/_build/
+
+# Publication cleanup archive intentionally preserves previously tracked
+# generated files outside active source/docs/test paths.
+!deprecated/generated_artifacts/
+!deprecated/generated_artifacts/**
+
 # QA artifacts
 *_qa_metrics.json
 *_qa_metrics.parquet

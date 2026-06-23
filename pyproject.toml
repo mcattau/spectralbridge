@@ -10,6 +10,13 @@ readme = "README.md"
 requires-python = ">=3.10"
 authors = [{ name = "Earth Lab" }]
 license = { file = "LICENSE" }
+keywords = [
+    "scientific infrastructure",
+    "remote sensing",
+    "hyperspectral",
+    "neon",
+    "cross-sensor calibration",
+]
 classifiers = [
     "Programming Language :: Python :: 3",
     "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
@@ -49,6 +56,21 @@ docs = [
     "mkdocstrings[python]",
     "mkdocs-macros-plugin",
     "mkdocs-glightbox",
+    "pytest-playwright>=0.5",
+]
+dev = [
+    "pytest>=7.4",
+    "pytest-xdist>=3.5",
+    "pytest-cov>=4.1",
+    "mkdocs",
+    "mkdocs-material",
+    "mkdocstrings[python]",
+    "mkdocs-macros-plugin",
+    "mkdocs-glightbox",
+    "pytest-playwright>=0.5",
+    "ruff>=0.5",
+    "build>=1.2",
+    "twine>=5",
 ]
 
 [project.scripts]
@@ -68,15 +90,17 @@ csc-merge-duckdb = "spectralbridge.merge_duckdb:main"
 
 [project.urls]
 Homepage = "https://github.com/earthlab/spectralbridge"
+Repository = "https://github.com/earthlab/spectralbridge"
 Documentation = "https://earthlab.github.io/spectralbridge/"
 Issues = "https://github.com/earthlab/spectralbridge/issues"
+Citation = "https://github.com/earthlab/spectralbridge/blob/main/CITATION.cff"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
 include-package-data = true
 
 [tool.setuptools.package-data]
-spectralbridge = ["data/*.json", "data/brightness/*.json"]
+spectralbridge = ["data/*.csv", "data/*.json", "data/brightness/*.json"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

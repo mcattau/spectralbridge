@@ -47,7 +47,6 @@ from .qa_metrics import (
 )
 
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
 
 _DEFAULT_RGB_TARGETS = (660.0, 560.0, 490.0)
 _EXPECTED_HEADER_KEYS = ["wavelength", "fwhm", "band names"]
@@ -1643,7 +1642,7 @@ def _render_delta(
     delta_q75 = np.asarray(report.delta_q75, dtype=float)
     delta_q90 = np.asarray(report.delta_q90, dtype=float)
     delta_abs_median = np.asarray(report.delta_abs_median, dtype=float)
-    ax.set_title("Correction Distribution vs Wavelength")
+    ax.set_title("Correction Distribution By Wavelength")
     ax.fill_between(xs, delta_q10, delta_q90, alpha=0.15, color="#4c78a8", label="10-90%")
     ax.fill_between(xs, delta_q25, delta_q75, alpha=0.25, color="#4c78a8", label="IQR")
     ax.plot(xs, delta_median, color="#1f77b4", linewidth=2.0, label="signed median Δ")
@@ -2153,6 +2152,41 @@ def _render_issues(ax: Axes, issues: list[str]) -> None:
     )
 
 
+def _render_aop_qa_summary(ax: Axes, metrics: QAMetrics) -> None:
+    """Render a compact text summary for the normal AOP QA PNG."""
+
+    header = metrics.header
+    mask = metrics.mask
+    issue_lines = metrics.issues[:5] if metrics.issues else ["No general QA issues flagged."]
+    lines = [
+        f"Flightline: {metrics.provenance.flightline_id}",
+        f"Bands: {header.n_bands}",
+        f"Wavelengths: {header.first_nm} - {header.last_nm} nm",
+        f"Wavelength source: {header.wavelength_source}",
+        f"Valid pixels: {mask.valid_pct:.2f}%",
+        f"Negative reflectance: {metrics.negatives_pct:.2f}%",
+        f">1.2 reflectance: {metrics.overbright_pct:.2f}%",
+        "",
+        "Flags:",
+        *[f"- {issue}" for issue in issue_lines],
+    ]
+    if metrics.brightness_summary:
+        lines.extend(["", f"Brightness tables: {len(metrics.brightness_summary)}"])
+
+    ax.text(
+        0.02,
+        0.98,
+        "\n".join(lines),
+        transform=ax.transAxes,
+        ha="left",
+        va="top",
+        fontsize=8.5,
+        family="monospace",
+    )
+    ax.axis("off")
+    ax.set_title("QA Summary And Flags")
+
+
 def _nodata_mask(cube: np.ndarray, nodata_value: float | None) -> np.ndarray:
     mask = ~np.isfinite(cube)
     if nodata_value is not None and np.isfinite(nodata_value):
@@ -2317,7 +2351,7 @@ def _render_drone_band_fidelity(
                 sampled_values.append(corr_trace)
     ax.plot(xs, raw_display, color="#1f77b4", linewidth=2.0, label="raw median", zorder=3)
     ax.plot(xs, corr_display, color="#ff7f0e", linewidth=1.8, label="corrected median", zorder=3)
-    ax.set_title("Band Fidelity And Sampled Spectra")
+    ax.set_title("Median Spectra And Sampled Pixel Traces")
     ax.set_xlabel("Wavelength (nm)")
     ax.set_ylabel("Reflectance")
 
@@ -2391,7 +2425,7 @@ def _render_drone_correction_magnitude(
     finite = abs_delta[np.isfinite(abs_delta)]
     vmax = float(np.nanpercentile(finite, 95)) if finite.size else 1.0
     image = ax.imshow(abs_delta, cmap="viridis", vmin=0.0, vmax=max(vmax, 1e-6))
-    ax.set_title("Per-Pixel Median Absolute Correction Across Bands")
+    ax.set_title("Spatial Median Absolute Correction Across Bands")
     ax.set_xticks([])
     ax.set_yticks([])
     plt.colorbar(image, ax=ax, fraction=0.046, pad=0.04, label="|delta|")
@@ -2444,12 +2478,6 @@ def _render_drone_correction_magnitude(
         fontsize=8,
         bbox=dict(boxstyle="round", facecolor="white", alpha=0.85, edgecolor="none"),
     )
-    if np.any(np.isfinite(changed_frac)):
-        inset = ax.inset_axes([0.66, 0.66, 0.28, 0.28])
-        inset.imshow(changed_frac, cmap="magma", vmin=0.0, vmax=100.0)
-        inset.set_title("% changed", fontsize=7)
-        inset.set_xticks([])
-        inset.set_yticks([])
     return summary
 
 
@@ -2458,7 +2486,7 @@ def _render_drone_polygon_overlay(
     raster_img: Path,
     polygon_path: Path | None,
 ) -> str | None:
-    ax.set_title("Drone Overlay Debug")
+    ax.set_title("Polygon Overlay On Corrected Raster")
 
     if polygon_path is None:
         ax.text(0.5, 0.5, "No polygon path provided", ha="center", va="center", transform=ax.transAxes)
@@ -2534,7 +2562,7 @@ def _render_drone_merged_preview(
     qa_summary: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     ax.axis("off")
-    ax.set_title("Merged Table Preview")
+    ax.set_title("Merged Polygon Parquet Preview")
 
     summary: dict[str, Any] = {
         "path": str(merged_path) if merged_path is not None else None,
@@ -2746,7 +2774,7 @@ def render_drone_panel(
 
     axes[0, 0].imshow(np.clip(rgb_image, 0, 1))
     axes[0, 0].set_title(
-        f"Original ENVI RGB (bands {rgb_indices[0]+1}/{rgb_indices[1]+1}/{rgb_indices[2]+1})"
+        f"Raw Reflectance RGB Preview (bands {rgb_indices[0]+1}/{rgb_indices[1]+1}/{rgb_indices[2]+1})"
     )
     axes[0, 0].axis("off")
     axes[0, 0].text(
@@ -2794,8 +2822,16 @@ def render_drone_panel(
         raw_path.stem.replace("__envi", ""),
         qa_summary=qa_summary,
     )
-    _render_drone_nodata_map(axes[3, 0], raw_nodata_fraction, "Raw ENVI -9999 / invalid map")
-    _render_drone_nodata_map(axes[3, 1], corr_nodata_fraction, "Corrected ENVI -9999 / invalid map")
+    _render_drone_nodata_map(
+        axes[3, 0],
+        raw_nodata_fraction,
+        "Raw Invalid / NoData Band Fraction",
+    )
+    _render_drone_nodata_map(
+        axes[3, 1],
+        corr_nodata_fraction,
+        "Corrected Invalid / NoData Band Fraction",
+    )
 
     for ax in axes.flat:
         if ax not in {axes[0, 0], axes[2, 0], axes[2, 1], axes[3, 0], axes[3, 1], axes[1, 1]}:
@@ -3019,25 +3055,33 @@ def render_flightline_panel(
         brightness_summary=brightness_summary,
     )
 
-    rgb_image, rgb_indices = _rgb_preview(corr_cube, wavelengths, rgb_targets)
+    raw_rgb_image, raw_rgb_indices = _rgb_preview(raw_cube, wavelengths, rgb_targets)
+    corr_rgb_image, corr_rgb_indices = _rgb_preview(corr_cube, wavelengths, rgb_targets)
 
-    fig, axes = plt.subplots(2, 2, figsize=(12, 8))
+    fig, axes = plt.subplots(2, 3, figsize=(15, 9))
     fig.suptitle(f"QA panel – {prefix}")
 
-    ax_rgb = axes[0, 0]
-    ax_rgb.imshow(np.clip(rgb_image, 0, 1))
-    ax_rgb.set_title(
-        f"RGB preview (bands {rgb_indices[0]+1}/{rgb_indices[1]+1}/{rgb_indices[2]+1})"
+    ax_raw_rgb = axes[0, 0]
+    ax_raw_rgb.imshow(np.clip(raw_rgb_image, 0, 1))
+    ax_raw_rgb.set_title(
+        f"Original ENVI RGB (bands {raw_rgb_indices[0]+1}/{raw_rgb_indices[1]+1}/{raw_rgb_indices[2]+1})"
     )
-    ax_rgb.axis("off")
-    _render_issues(ax_rgb, issues)
+    ax_raw_rgb.axis("off")
 
-    _render_hist(axes[0, 1], raw_sample, corr_sample, sample_mask)
+    ax_corr_rgb = axes[0, 1]
+    ax_corr_rgb.imshow(np.clip(corr_rgb_image, 0, 1))
+    ax_corr_rgb.set_title(
+        f"Corrected ENVI RGB (bands {corr_rgb_indices[0]+1}/{corr_rgb_indices[1]+1}/{corr_rgb_indices[2]+1})"
+    )
+    ax_corr_rgb.axis("off")
+
+    _render_hist(axes[0, 2], raw_sample, corr_sample, sample_mask)
     _render_delta(axes[1, 0], wavelengths, correction_report)
     _render_scatter(axes[1, 1], scatter_data)
+    _render_aop_qa_summary(axes[1, 2], metrics)
 
     for ax in axes.flat:
-        if ax is not ax_rgb:
+        if ax not in {ax_raw_rgb, ax_corr_rgb, axes[1, 2]}:
             ax.grid(True, alpha=0.2)
 
     _render_footer(fig, metrics)
